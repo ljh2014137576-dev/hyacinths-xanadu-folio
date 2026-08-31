@@ -11,6 +11,7 @@ export default tseslint.config(
       'playwright-report/**',
       'test-results/**',
       'fixtures/**/broken.ts',
+      'scripts/*.mjs',
       'eslint.config.js',
     ],
   },

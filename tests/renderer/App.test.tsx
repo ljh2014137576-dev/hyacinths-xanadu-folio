@@ -4,13 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App.js';
 import type { UtilityHealth, XanaduDesktopApi } from '../../src/ipc/contracts.js';
 import type { UserWorkspaceState } from '../../src/model/index.js';
+import { testSnapshot } from '../fixtures/adapter-snapshot.js';
 
 describe('App shell', () => {
   const api: XanaduDesktopApi = {
     getAppInfo: vi.fn(() => Promise.resolve({ name: 'Xanadu', version: '0.1.0', platform: 'test' })),
     getUtilityHealth: vi.fn((): Promise<UtilityHealth> => Promise.resolve({ status: 'healthy', process: 'utility' })),
     selectWorkspace: vi.fn(() => Promise.resolve({ handle: 'opaque-handle', displayName: 'order-service' })),
-    indexWorkspace: vi.fn(() => Promise.reject(new Error('not used in shell test'))),
+    indexWorkspace: vi.fn(() => Promise.resolve(testSnapshot)),
     cancelIndex: vi.fn(() => Promise.resolve(false)),
     onIndexProgress: vi.fn(() => () => undefined),
     loadUserState: vi.fn((): Promise<UserWorkspaceState> => Promise.resolve({ schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [] })),
@@ -24,8 +25,9 @@ describe('App shell', () => {
 
   it('selects a workspace without rendering an absolute path', async () => {
     render(<App />);
-    await userEvent.click(screen.getByRole('button', { name: '选择本地项目' }));
-    expect(await screen.findByText('已授权：order-service')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '选择本地 TypeScript 项目' }));
+    expect(await screen.findByText('选择入口函数，创建 FlowPage')).toBeInTheDocument();
+    expect(screen.getAllByText('order-service').length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toContain('C:\\');
   });
 });

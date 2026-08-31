@@ -20,5 +20,5 @@
     "resolveJsonModule": true,
     "types": ["node", "vite/client", "vitest/globals"]
   },
-  "include": ["electron", "src", "tests", "vite.config.ts", "vitest.config.ts"]
+  "include": ["electron", "src", "tests", "vite.config.ts", "vite.preload.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }

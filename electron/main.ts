@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   app,
   BrowserWindow,
@@ -45,9 +45,13 @@ const senderIsTrusted = (event: IpcMainInvokeEvent): boolean => {
   const senderUrl = event.senderFrame?.url ?? '';
   const developmentUrl = process.env.VITE_DEV_SERVER_URL;
   if (developmentUrl !== undefined) {
-    return senderUrl.startsWith(developmentUrl);
+    try {
+      return new URL(senderUrl).origin === new URL(developmentUrl).origin;
+    } catch {
+      return false;
+    }
   }
-  return senderUrl.startsWith('file://');
+  return senderUrl === pathToFileURL(join(currentDirectory, '../../dist/index.html')).href;
 };
 
 const assertTrustedEmptyRequest = (event: IpcMainInvokeEvent, request: unknown): void => {
@@ -262,7 +266,14 @@ const createWindow = (): BrowserWindow => {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, targetUrl) => {
     const developmentUrl = process.env.VITE_DEV_SERVER_URL;
-    const allowed = developmentUrl !== undefined ? targetUrl.startsWith(developmentUrl) : targetUrl.startsWith('file://');
+    let allowed = targetUrl === pathToFileURL(join(currentDirectory, '../../dist/index.html')).href;
+    if (developmentUrl !== undefined) {
+      try {
+        allowed = new URL(targetUrl).origin === new URL(developmentUrl).origin;
+      } catch {
+        allowed = false;
+      }
+    }
     if (!allowed) {
       event.preventDefault();
     }

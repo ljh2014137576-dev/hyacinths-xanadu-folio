@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { AdapterIndexSnapshot } from '../adapter-api/index.js';
 import {
   flowPageId,
@@ -10,9 +9,8 @@ import {
   type SymbolId,
 } from '../model/index.js';
 
-const revisionFor = (snapshot: AdapterIndexSnapshot): string => createHash('sha256')
-  .update(snapshot.sourceFiles.map((file) => `${file.id}:${file.revision}`).sort().join('|'))
-  .digest('hex');
+const revisionFor = (snapshot: AdapterIndexSnapshot): string =>
+  `projection:${snapshot.sourceFiles.map((file) => `${file.id}:${file.revision}`).sort().join('|')}`;
 
 export interface ProjectionOptions {
   readonly maxDepth?: number;

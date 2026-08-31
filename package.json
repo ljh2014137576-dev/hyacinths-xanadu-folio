@@ -12,12 +12,14 @@
     "start": "npm run build && electron .",
     "build": "rimraf dist dist-electron && npm run build:renderer && npm run build:electron",
     "build:renderer": "vite build",
-    "build:electron": "tsc6 -p tsconfig.electron.json",
+    "build:electron": "tsc6 -p tsconfig.electron.json && vite build --config vite.preload.config.ts",
     "lint": "eslint .",
     "typecheck": "tsc6 -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "screenshots": "node scripts/capture-screenshots.mjs",
+    "license:check": "node scripts/check-licenses.mjs"
   },
   "dependencies": {
     "@typescript/typescript6": "6.0.2",
