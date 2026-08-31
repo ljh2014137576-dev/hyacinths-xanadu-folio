@@ -4,10 +4,12 @@ node_modules/
 
 # Build and test output
 dist/
+dist-electron/
 out/
 coverage/
 playwright-report/
 test-results/
+.tmp/
 
 # Vite and Electron artifacts
 .vite/
