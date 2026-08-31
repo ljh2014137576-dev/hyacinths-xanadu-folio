@@ -1,0 +1,40 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm/
+
+# Build and test output
+dist/
+out/
+coverage/
+playwright-report/
+test-results/
+
+# Vite and Electron artifacts
+.vite/
+release/
+*.log
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local workspace state
+.xanadu/
+*.local
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+
