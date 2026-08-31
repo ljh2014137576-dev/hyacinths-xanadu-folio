@@ -94,7 +94,7 @@ export interface IndexRequest {
 export interface IndexProgress {
   readonly phase: 'detect' | 'read' | 'parse' | 'bind' | 'resolve' | 'persist';
   readonly completed: number;
-  readonly total?: number;
+  readonly total?: number | undefined;
   readonly message: string;
 }
 

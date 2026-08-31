@@ -12,6 +12,7 @@ import type {
   DetectionResult,
   IndexEvent,
   IndexEventSink,
+  IndexProgress,
   IndexRequest,
   IndexSummary,
   LanguageAdapter,
@@ -118,7 +119,10 @@ const collectFiles = async (rootPath: string): Promise<readonly string[]> => {
   return collected.sort();
 };
 
-export const createFileSystemAdapterHost = (rootPath: string): AdapterHost => ({
+export const createFileSystemAdapterHost = (
+  rootPath: string,
+  onProgress: (progress: IndexProgress) => void = () => undefined,
+): AdapterHost => ({
   listFiles: () => collectFiles(rootPath),
   readFile: async (projectRelativePath, expectedRevision) => {
     const content = await fs.readFile(resolveInside(rootPath, projectRelativePath), 'utf8');
@@ -128,7 +132,7 @@ export const createFileSystemAdapterHost = (rootPath: string): AdapterHost => ({
   },
   now: () => new Date().toISOString(),
   hash: sha256,
-  reportProgress: () => undefined,
+  reportProgress: onProgress,
 });
 
 interface FragmentRecord {
@@ -431,7 +435,13 @@ const resolutionForCall = (
   const signatureDeclaration = checker.getResolvedSignature(node)?.getDeclaration();
   if (signatureDeclaration !== undefined) {
     declarations.push(signatureDeclaration);
-    evidence.push({ kind: 'call-signature', detail: signatureDeclaration.getSourceFile().fileName });
+    const signaturePath = signatureDeclaration.getSourceFile().fileName;
+    evidence.push({
+      kind: 'call-signature',
+      detail: isPathInside(rootPath, signaturePath)
+        ? normalizeRelativePath(relative(rootPath, signaturePath))
+        : 'external declaration',
+    });
   }
 
   const targetRecords = [...new Set(declarations.map((declaration) => fragmentForDeclaration(fragments, declaration)).filter((value): value is FragmentRecord => value !== undefined))];
@@ -693,8 +703,12 @@ export class TypeScriptLanguageAdapter implements LanguageAdapter {
   }
 }
 
-export const indexTypeScriptProject = async (rootPath: string, signal = new AbortController().signal): Promise<AdapterIndexSnapshot> => {
-  const host = createFileSystemAdapterHost(rootPath);
+export const indexTypeScriptProject = async (
+  rootPath: string,
+  signal = new AbortController().signal,
+  onProgress: (progress: IndexProgress) => void = () => undefined,
+): Promise<AdapterIndexSnapshot> => {
+  const host = createFileSystemAdapterHost(rootPath, onProgress);
   const adapter = new TypeScriptLanguageAdapter(rootPath);
   const candidateFiles = await host.listFiles(typescriptAdapterManifest.detection.filePatterns);
   const context: AdapterCallContext = { requestId: `index:${basename(rootPath)}`, generation: 1, signal };

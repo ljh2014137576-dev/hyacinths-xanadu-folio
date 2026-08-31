@@ -208,7 +208,7 @@ export interface FlowPlacement {
 
 export type BranchViewFilter =
   | { readonly mode: 'show-all' }
-  | { readonly mode: 'only'; readonly branchId: string };
+  | { readonly mode: 'only'; readonly branchId: string; readonly arm: 'A' | 'B' };
 
 export interface HiddenContentSummary {
   readonly hiddenBranches: number;
@@ -299,7 +299,7 @@ export const flowPageSchema = z.object({
   collapsedRegions: z.array(z.string()),
   branchFilter: z.discriminatedUnion('mode', [
     z.object({ mode: z.literal('show-all') }),
-    z.object({ mode: z.literal('only'), branchId: z.string().min(1) }),
+    z.object({ mode: z.literal('only'), branchId: z.string().min(1), arm: z.enum(['A', 'B']) }),
   ]),
   viewport: z.object({
     x: z.number().finite(),
