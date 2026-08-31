@@ -10,4 +10,7 @@
 - `adr/0002-language-adapter-contract.md`
 - `adr/0003-flow-rendering-model.md`
 - `mvp-plan.md`
+- `dependencies.md`
+- `screenshots/standard-view.png`
+- `screenshots/immersive-view.png`
 
