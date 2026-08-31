@@ -8,13 +8,13 @@ Milestone：[MVP 0.1](https://github.com/ljh2014137576-dev/xanadu-code-flow-brow
 
 ## 1. 交付策略
 
-MVP 不应按“先做完后端、再做完 UI”的水平分层路线推进。第一步先交付一条可运行、可测试、可演示的窄纵向切片，证明产品最困难的闭环：
+MVP 不应按“先做完后端、再做完 UI”的水平分层路线推进。本计划中的**第一条可运行纵向切片就是完整 MVP 0.1**：它必须在同一个 builder 分支/PR 和同一个 Milestone 中覆盖 Issues #1-#14，并形成以下完整用户旅程：
 
-> 用户选择本地 TypeScript fixture → 正式 Compiler API 建索引 → 选择 `createOrder()` → 只沿出站调用展开 → 源码片段为主体 → SVG 桥梁精确连接调用范围与目标定义 → 查看原文件并返回 → 重启后恢复标准 FlowPage。
+> 启动 Electron/React 应用 → 选择本地 TypeScript 项目 → LanguageAdapter 建索引 → 创建 FlowPage 并只沿出站调用展开 → 精确来源桥梁与来源往返 → 标准/沉浸视图共享状态 → Ctrl+Space 项目抽屉 → 静态分支查看过滤 → LoopRegion/递归有界展示 → 创建并恢复 BusinessNode → 自动测试、CI 与 README 共同证明可安装、可运行、可恢复。
 
-之后再在同一模型上增加 LoopRegion/分支、沉浸视图/抽屉、BusinessNode。不得为每个页面创建临时 DTO 或第二套状态。
+A、B、C、D 仅是同一 builder PR 内部的增量实现顺序和验收批次，用于降低施工风险；它们不是后续产品切片，也不能单独宣称完成第一条纵向切片。可以先让 A 的窄闭环运行以便尽早集成，但只有 A+B+C+D 及最终端到端门禁全部通过，builder PR 才达到完成条件。
 
-## 2. 第一条可运行纵向切片：Slice A “从目录到精确桥梁”
+## 2. 第一条可运行纵向切片：完整 MVP 0.1
 
 ### 2.1 用户场景
 
@@ -27,36 +27,55 @@ MVP 不应按“先做完后端、再做完 UI”的水平分层路线推进。�
 7. 每条桥梁从具体调用表达式范围连接到具体目标声明范围。
 8. fixture 中一条动态调用显示为 unresolved，不能连接到猜测函数。
 9. 点击来源打开原始文件精确范围，返回后保持 scroll/zoom/selection。
-10. 关闭并重新打开应用，标准 FlowPage 入口、展开状态和 viewport 恢复。
+10. 用户对 `paid` 条件选择“仅查看已支付”；未支付路径变暗或折叠，显示隐藏数量，并可恢复“显示全部”。
+11. 用户展开包含 for/while/for-of 的 LoopRegion；循环体只出现一次，回环、break/continue/return/throw 与静态次数语义准确，递归不会无限增长。
+12. 用户切换到沉浸式视图；同一 FlowPage 的位置、展开和筛选不丢失，源码与桥梁占据主要画布。
+13. 用户用 Ctrl+Space 打开覆盖画布的项目抽屉，用 Esc 关闭，并可用图钉转为标准视图常驻目录。
+14. 用户多选函数创建、命名、描述、排序并折叠/展开“创建订单” BusinessNode；成员与节点定义来源均可查看。
+15. 关闭并重新打开应用，FlowPage 模式、viewport、展开/折叠、分支过滤与 BusinessNode 全部恢复。
+16. README 中记录从 clean checkout 安装、开发启动、测试和生产构建的完整命令。
 
 ### 2.2 包含范围
 
-| 能力 | Slice A 验收 | Issue |
+| 能力 | 完整纵向切片验收 | Issue |
 | --- | --- | --- |
 | Electron 外壳 | main/preload/renderer 三边界，安全目录选择，utility indexer，开发与 build 命令 | #3 |
-| 通用模型 | SourceFile、FunctionFragment、RelationBridge、FlowPage、Provenance、Diagnostic；LoopRegion 类型可定义但不要求完整 UI | #1 |
+| 通用模型 | SourceFile、FunctionFragment、RelationBridge、FlowPage、BusinessNode、LoopRegion、Provenance、Diagnostic 均落地并严格类型化 | #1 |
 | Adapter 合同 | manifest/capabilities/version、test adapter、会话/取消/partial failure contract | #2 |
 | TypeScript adapter | tsconfig、.ts/.tsx、函数/方法、跨文件 import/alias、调用/定义 UTF-16 ranges、resolved/ambiguous/unresolved | #5 |
 | 索引与展开 | 渐进 batch、函数搜索、outgoing-only、最大深度/递归 guard 基础、取消和单文件失败 | #4 |
 | 精确桥梁 | CodeSurface anchors + SVG overlay；scroll/zoom/resize 后准确；状态不只靠颜色 | #6 |
 | 标准视图 | 项目目录、中央源码流程、右侧关系/来源详情；源码为主体 | #7 |
 | 来源往返 | project-relative path、精确 reveal、返回快照、stale 范围错误 | #8 |
-| 持久化 | 一个标准 FlowPage 的入口、展开、viewport 和 index metadata；事务/原子保存 | #1/#4/#7 |
-| 质量门禁 | npm lockfile、lint、strict typecheck、unit/component/build CI，最小 Electron smoke | #12 |
+| 静态分支筛选 | 默认全显、仅看某分支、其他分支可发现/恢复；明确不是运行路径 | #9 |
+| 项目抽屉 | Ctrl+Space/Esc/图钉、覆盖而不挤压、搜索与焦点可访问 | #10 |
+| 沉浸式视图 | 与标准视图共享 FlowPage，源码与桥梁占满画布，切换状态不丢失 | #11 |
+| LoopRegion | 循环体一次、entry/back/exit、break/continue/return/throw、静态次数、递归防无限 | #13 |
+| BusinessNode | 创建、命名、描述、排序、折叠/展开、成员与节点来源、保存恢复、不嵌套 | #14 |
+| 持久化 | 标准/沉浸 FlowPage、筛选、LoopRegion 展示状态、BusinessNode 与 index metadata 事务保存 | #1/#4/#7/#9/#11/#14 |
+| 质量门禁与文档 | npm lockfile、lint、strict typecheck、unit/component/Electron E2E/build CI；README 安装/启动/测试/构建 | #3/#12 |
 
-### 2.3 明确排除
+### 2.3 内部验收批次
 
-- 沉浸式视图和 Ctrl+Space 抽屉（#10/#11）。
-- 完整分支查看过滤（#9）。
-- 完整 LoopRegion 展示、次数与 break/continue/return/throw UI（#13）；但索引合同不得阻塞后续。
-- 创建/编辑 BusinessNode（#14）。
-- JavaScript、C/C++ 或第三方可安装规则包。
-- 任意运行时调试、真实分支或实际循环次数。
+| 批次 | 同一 builder PR 内的目的 | 覆盖 | 是否可单独宣称纵向切片完成 |
+| --- | --- | --- | --- |
+| A：基础闭环 | 尽早跑通 Electron→项目选择→TS adapter→索引→FlowPage→桥梁→来源往返 | #1-#8、#12 基础门禁 | 否 |
+| B：静态控制流 | 在同一模型/fixture 上完成分支过滤、LoopRegion 与递归 | #9、#13，并扩充 #4/#5/#6 测试 | 否 |
+| C：完整阅读交互 | 完成标准/沉浸共享状态和 Ctrl+Space 项目抽屉 | #10、#11，并扩充 #7/#8 测试 | 否 |
+| D：用户语义与最终门禁 | 完成 BusinessNode、全状态恢复、README 和完整 Electron E2E | #14、#3/#12 最终验收、#1-#14 回归 | 只有 A+B+C+D 全部通过才是“是” |
+
+批次可以用小提交逐步推送和评审，但 builder PR 在 D 与最终 DoD 完成前必须保持未完成状态；不得把 B/C/D 移到另一个“后续产品切片”来满足 A 的合并。
+
+### 2.4 完整纵向切片不包含
+
+- JavaScript、C/C++ 或任意第三方来源规则包；MVP 只要求内置 TypeScript adapter，但必须实现 manifest/能力/健康状态。
+- 任意运行时调试、真实分支、变量值或实际循环次数。
 - 自动跨进程、跨服务或跨语言调用解析。
+- BusinessNode 嵌套。
 
-排除项不得用硬编码临时字段占位；核心模型必须有后续扩展点，UI 只显示当前 capability。
+这些排除项不得用硬编码临时字段占位；核心模型必须保留后续扩展点，UI 只显示当前 capability。
 
-### 2.4 Fixture
+### 2.5 Fixture
 
 仓库内添加最小但真实的 TypeScript fixture（实现阶段完成，不属于本分析 PR）：
 
@@ -68,6 +87,8 @@ fixtures/order-service/
   src/inventory/inventory.service.ts     # reserveInventory
   src/repositories/order.repository.ts   # saveOrder
   src/integrations/payment.gateway.ts    # external/dynamic 调用
+  src/workflows/order-flow.ts             # paid 分支、循环、break/continue/return/throw
+  src/workflows/retry.ts                  # 递归与调用环
   src/shared/broken.ts                    # 可恢复语法错误 fixture
 ```
 
@@ -80,10 +101,14 @@ Fixture 必须包含：
 - 一个动态/`any` 调用，产生 unresolved/ambiguous，而非伪 resolved。
 - 一个自递归或 A→B→A 调用环，用于证明不会无限展开。
 - 一个单文件语法错误，证明 partial index。
+- 一个 paid/unpaid 条件，证明默认全显、查看过滤、隐藏数量与恢复。
+- for、while、do-while、for-of、for-in、嵌套循环，以及 break/continue/return/throw 路径。
+- 可证明常量上限、次数表达式和静态未知三种 iteration estimate。
+- 至少四个可组合为“创建订单” BusinessNode 的函数，且来源分布在多个文件。
 
-Loop/branch fixture 在 Slice B 增加，不要为了 Slice A 的视觉演示伪造控制流结果。
+同一 fixture 随 A→B→C→D 内部批次增量完善，但完整内容必须在 builder PR 完成前提交。不得为了早期 A 演示伪造控制流结果。
 
-### 2.5 Slice A Definition of Done
+### 2.6 完整纵向切片 Definition of Done
 
 所有条件必须同时满足：
 
@@ -98,7 +123,12 @@ Loop/branch fixture 在 Slice B 增加，不要为了 Slice A 的视觉演示伪
 - scroll、zoom、resize 后桥梁端点保持在目标范围容差内。
 - 来源往返恢复位置；revision 漂移时不静默跳转。
 - renderer bundle 不含 Node/TypeScript Compiler API；Electron 安全设置和 IPC sender/schema 校验有测试。
-- FlowPage 重启恢复通过；清除可重建索引不会删除用户 FlowPage。
+- 标准/沉浸视图共享同一 FlowPage；Ctrl+Space/Esc/图钉抽屉交互与焦点测试通过。
+- 分支过滤前后 RelationBridge 事实数量不变，隐藏路径可发现/恢复，UI 明示静态查看语义。
+- LoopRegion 循环体只建模一次；entry/back/exit 与 break/continue/return/throw 测试通过；三种静态次数文案没有实际执行语义。
+- BusinessNode 创建、排序、折叠/展开、成员与节点来源、禁止嵌套和保存恢复测试通过。
+- FlowPage 模式、viewport、展开/折叠、分支过滤与 BusinessNode 重启恢复通过；清除可重建索引不会删除用户资产。
+- README 从 clean checkout 的 npm install、开发启动、测试和生产构建命令经过实际验证。
 - PR 说明列出依赖许可证、精确版本和上游链接。
 
 ## 3. 风险先行 spikes
@@ -138,53 +168,75 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 
 失败时回退为显式 Vite build + Forge packaging；不擅自切换 Tauri 或取消 Vite。
 
-## 4. 推荐 PR 序列
+## 4. 同一 builder PR 的内部提交序列
 
-每个 PR 只解决一个可审查边界，合并前 CI 全绿。主要产品代码不得直接提交 main。
+完整纵向切片在一个 builder 分支和一个目标为 `main` 的实现 PR 中施工。下面是便于审查、回滚和持续集成的小提交顺序，不是多个可分别合并的产品 PR。builder PR 在 A+B+C+D 与最终门禁全部完成前保持 draft/未完成；主要产品代码不得直接提交 main。
 
-### PR 1：质量门与应用外壳（#3、#12 部分）
+### A1：质量门与应用外壳（#3、#12 部分）
 
 - npm workspaces、lockfile、strict tsconfig、lint/test/build scripts。
 - Electron main/preload/renderer + utility process hello/health。
 - CI 从文档 bootstrap 切换为真实 install/lint/typecheck/test/build。
-- 安全设置、typed IPC skeleton、README 命令。
+- 安全设置、typed IPC skeleton、README 命令骨架。
 
-### PR 2：通用模型与 adapter contract（#1、#2）
+### A2：通用模型与 adapter contract（#1、#2）
 
-- branded IDs、UTF-16 half-open ranges、resolution union、diagnostics、LoopRegion/FlowPage schema。
+- branded IDs、UTF-16 half-open ranges、resolution union、diagnostics、LoopRegion/FlowPage/BusinessNode schema。
 - test adapter 与 contract suite。
 - serialization/migration tests。
 
-### PR 3：TypeScript adapter 与 fixture（#5）
+### A3：TypeScript adapter 与完整 fixture 基础（#5）
 
 - 官方 TS6 compatibility API。
 - project detection、Program/TypeChecker、symbols/references/ranges。
 - resolved/ambiguous/unresolved/external、partial file diagnostics。
 - 禁止 AST 跨合同。
 
-### PR 4：索引、增量与出站投影（#4）
+### A4：索引、增量与出站投影（#4）
 
 - batch transaction、progress/cancel、search。
 - outgoing-only expansion、cycle/max-depth guard。
 - last-good/stale revision 与 storage port。
 
-### PR 5：标准源码页与精确桥梁（#6、#7）
+### A5：标准源码页、精确桥梁与来源往返（#6、#7、#8）
 
 - CodeSurface、AnchorRegistry、world transform、SVG renderer。
 - 关系详情、highlight/dim、offscreen stub、无颜色依赖。
-- 几何与组件测试。
-
-### PR 6：来源往返与恢复（#8、#12 部分）
-
 - source reveal、NavigationSnapshot、project-relative path、stale handling。
-- FlowPage 持久化/重启恢复。
-- Electron end-to-end smoke，完成 Slice A。
+- 此时形成可运行的基础闭环，但**尚未完成第一条纵向切片**。
 
-如果必须并行施工，PR 只能通过已合并接口或小型合同 PR 协作；不得在分支间复制不同版本的模型类型。
+### B：静态控制流（#9、#13）
 
-## 5. 后续切片
+- 扩充同一 fixture 和 adapter/index 模型，完成 BranchContext、BranchViewFilter 与 LoopRegion。
+- 连接分支筛选、隐藏摘要、循环/递归 UI 和全部控制流测试。
 
-### Slice B：静态控制流可解释性（#9、#13）
+### C：沉浸阅读与项目抽屉（#10、#11）
+
+- 完成标准/沉浸共享 FlowPage、模式切换几何重算、Ctrl+Space/Esc/图钉和焦点测试。
+
+### D：BusinessNode、完整恢复与最终门禁（#14、#3、#12）
+
+- 完成 BusinessNode 创建/来源/保存恢复。
+- 完成全量 Electron E2E、README 实际命令验证、许可证记录和 #1-#14 回归。
+- 只有此提交之后全部 DoD 通过，builder PR 才可从 draft 转为 ready for review。
+
+如果协调者要求并行工作，只能在同一 builder PR 的共享合同上以可追踪提交协作；不得把 B/C/D 变成另一个后续产品切片，也不得在分支间复制不同版本的模型类型。
+
+## 5. 同一纵向切片的详细验收批次
+
+### 批次 A：基础闭环（#1-#8、#12 基础）
+
+目标：Electron/React 可运行，用户可选择 TypeScript 项目，建立语言无关索引和 FlowPage，只沿出站引用展开，精确桥梁与来源往返可用。
+
+验收：
+
+- clean checkout 可安装、开发启动和构建；renderer 权限边界成立。
+- TypeScript fixture 产出稳定 FunctionFragment、RelationBridge、解析状态和精确范围。
+- 默认 FlowPage 不出现 fixture 中与入口无关的入站 caller。
+- 标准视图源码为主体，桥梁在 scroll/zoom/resize 后仍准确。
+- 来源往返和基础 FlowPage 恢复通过。
+
+### 批次 B：静态控制流可解释性（#9、#13）
 
 目标：所有静态可能分支可见；用户过滤但不改变事实；循环体一次、回环与退出准确、递归有界。
 
@@ -197,7 +249,7 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 - upper-bound/expression/unknown 三种文案穷尽测试；没有实际次数字段。
 - 嵌套循环、递归和调用环不无限增长。
 
-### Slice C：沉浸阅读与项目抽屉（#10、#11）
+### 批次 C：沉浸阅读与项目抽屉（#10、#11）
 
 目标：同一 FlowPage 在标准/沉浸视图切换，源码与桥梁占满画布，抽屉覆盖而不挤压。
 
@@ -208,7 +260,7 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 - Ctrl+Space/Esc/图钉、focus trap、键盘搜索通过。
 - 选择函数后默认关闭，固定后成为标准目录。
 
-### Slice D：BusinessNode 与用户资产（#14）
+### 批次 D：BusinessNode 与用户资产（#14）
 
 目标：多选函数创建有来源、可保存恢复的组合语义。
 
@@ -220,17 +272,34 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 - 同一函数多节点归属按当前默认允许，并在产品决定改变时收紧校验。
 - 清索引/重建后 BusinessNode 不丢失，symbol relocation 不确定时要求用户处理。
 
-## 6. Milestone 完成门槛
+这些批次均属于同一第一条纵向切片；任何一批缺失都只能标记为“实现中”，不能把已完成批次当成用户要求的 MVP 0.1。
 
-MVP 0.1 完成不等于“14 个 Issue 有 UI”。完成门槛是：
+## 6. 第一条纵向切片的 #1-#14 完成门槛
 
-- #1-#14 的验收条件都有自动测试或可复现人工验收记录。
+| Issue | 完成证据；全部必须在同一 builder PR 中提供 |
+| --- | --- |
+| #1 通用模型 | SourceFile、FunctionFragment、RelationBridge、FlowPage、BusinessNode、LoopRegion、Provenance 可序列化、严格类型检查和 schema 测试通过 |
+| #2 LanguageAdapter | manifest、版本/能力/健康、测试 adapter、取消/partial failure 合同测试通过，核心无 TypeScript AST 类型 |
+| #3 应用外壳 | Electron/React/Vite 可开发启动和生产构建；main/preload/utility/renderer 边界、安全项目选择及 README 命令验证通过 |
+| #4 索引 | 渐进、取消、增量/失败恢复、搜索、outgoing-only、cycle/max-depth 测试通过 |
+| #5 TypeScript 规则包 | 正式 Compiler API 解析 tsconfig、函数/方法、跨文件 import/alias、调用目标与精确范围；不确定调用不伪装 resolved |
+| #6 来源桥梁 | call-site→target-definition 精确锚定；scroll/zoom/resize、状态线型/标签、unresolved 几何测试通过 |
+| #7 标准视图 | 左目录/中央源码 FlowPage/右来源详情可运行，源码是主体，主要交互测试通过 |
+| #8 来源查看 | 原文件精确范围、project-relative path、返回上下文与 stale/缺失文件恢复测试通过 |
+| #9 分支筛选 | 默认全显、仅看分支、隐藏数量/恢复、跨模式/重启保持；明确静态查看语义 |
+| #10 项目抽屉 | Ctrl+Space/Esc/图钉、覆盖不挤压、搜索/最近页/目录、焦点与可访问性测试通过 |
+| #11 沉浸视图 | 源码/桥梁占满画布，pan/scroll/zoom 可用，与标准视图共享 FlowPage 并保持状态 |
+| #12 测试与 CI | `npm ci`、lint、strict typecheck、unit/component/Electron E2E、build 在 PR CI 全绿，失败禁止合并 |
+| #13 LoopRegion | 五类源码循环体只建模一次，entry/back/exit 和 break/continue/return/throw 正确，三类静态次数与递归/嵌套测试通过 |
+| #14 BusinessNode | 多选、命名、描述、排序、折叠/展开、成员与节点来源、不嵌套、保存恢复测试通过 |
+
+跨 Issue 的最终门槛：
+
+- A+B+C+D 全部完成；完整 Electron E2E 按 2.1 的用户场景从项目选择运行到重启恢复。
 - 标准与沉浸视图均以源码为主体并共享状态。
-- TypeScript adapter 使用公开正式 API，解析状态不误导。
-- 默认展开严格出站-only。
-- 分支过滤可发现/恢复，循环/递归有界且不伪造运行事实。
+- 默认展开严格出站-only；分支过滤、循环次数和递归不伪造运行事实。
 - 本地源码没有未授权网络传输，renderer 没有任意文件权限。
-- 应用可从 clean checkout 安装、测试、构建和启动。
+- 应用可从 clean checkout 安装、测试、构建和启动，README 命令与实际脚本一致。
 - 依赖许可证和第三方 notices 可生成；无密钥、Token、绝对用户路径、构建产物或临时文件进入仓库。
 
 ## 7. 观测与性能验收计划
@@ -242,11 +311,11 @@ PRD 尚未给出默认最大展开深度和大型项目硬指标。本阶段不�
 - anchor measure/route/commit 耗时与 scroll frame latency。
 - 保存/恢复和 schema migration 耗时。
 
-在 Slice A fixture 与一个经授权的中型开源 fixture 上记录 baseline，再由产品/工程评审设定可执行预算。遥测默认关闭；性能日志只含计数、时长和项目相对类别，不含源码/绝对路径。
+在完整 MVP fixture 与一个经授权的中型开源 fixture 上记录 baseline，再由产品/工程评审设定可执行预算。遥测默认关闭；性能日志只含计数、时长和项目相对类别，不含源码/绝对路径。
 
 ## 8. 施工者必须遵守的约束
 
-- 每个主要功能在独立分支/PR；不直接开发 main，不自行合并。
+- A/B/C/D 在同一 builder 分支/PR 内以小提交推进；不直接开发 main，不把未完成批次拆成后续产品切片，不自行合并。
 - 使用 npm 和已提交 lockfile；不手工改 lockfile。
 - strict typecheck；禁止用大面积 `any`、`@ts-ignore` 或关闭规则绕过合同。
 - TypeScript 解析只用正式 Compiler API；正则不得替代 AST/TypeChecker。

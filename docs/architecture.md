@@ -20,6 +20,8 @@ Xanadu Code Flow Browser 是本地优先的静态代码阅读器。它从用户�
 - MVP 不包含断点、变量值、实时执行跟踪、线程、进程或时间线调试。
 - 源码、索引和工作区状态默认只保存在本机；没有独立授权不得上传源码。
 
+本架构中的“第一条可运行纵向切片”指完整 MVP 0.1，而不是只到标准视图的技术演示。它必须在同一个 builder PR/Milestone 中落地 Electron/React 应用外壳、项目选择、内置 TypeScript adapter、索引、FlowPage、精确桥梁、来源往返、标准/沉浸视图、Ctrl+Space 项目抽屉、静态分支筛选、LoopRegion、BusinessNode、完整 fixture、测试/CI 与 README。施工可以按 A→B→C→D 内部批次渐进集成，但任何单批次都不能独立宣称完成纵向切片。
+
 需求追踪见 [requirements-mapping.md](requirements-mapping.md)，实施顺序见 [mvp-plan.md](mvp-plan.md)。
 
 ## 2. 系统上下文与信任边界
@@ -75,7 +77,7 @@ preload 只暴露按用例命名的方法，例如 `selectWorkspace()`、`startI
 - 符号、关系、控制流、来源和诊断的增量索引。
 - 本地持久化事务。
 
-utility process 是故障隔离边界，不是对恶意规则包的完整安全沙箱。MVP 仅加载随应用发布且列入 allowlist 的可信规则包；任意第三方代码安装、签名和权限模型不属于首条纵向切片。
+utility process 是故障隔离边界，不是对恶意规则包的完整安全沙箱。完整 MVP 纵向切片必须加载随应用发布且列入 allowlist 的内置 TypeScript adapter，并展示 manifest、能力和健康状态；任意第三方来源代码的安装、签名和权限模型不属于该切片。
 
 ### 3.4 renderer
 
