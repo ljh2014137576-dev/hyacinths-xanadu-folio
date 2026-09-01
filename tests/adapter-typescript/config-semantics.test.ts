@@ -87,8 +87,13 @@ describe('TypeScript-compatible config enumeration', () => {
     const official = (config: object) => relativeNames(ts.parseJsonConfigFileContent(config, ts.sys, root, undefined, join(root, 'tsconfig.json')).fileNames);
     for (const config of [{}, { include: ['real'] }, { include: ['linked'] }, { include: ['real', 'linked'] }, { include: ['real', 'linked'], exclude: ['real', 'linked'] }]) expect(parse(config), JSON.stringify({ config, secured: parse(config), official: official(config) })).toEqual(official(config));
     expect(parse({ include: ['real', 'linked'] })).toHaveLength(1);
-    expect(parse({ include: ['real', 'linked'], exclude: ['real'] })).toEqual(['linked/linked.ts']);
-    expect(parse({ include: ['real', 'linked'], exclude: ['linked'] })).toEqual(['real/linked.ts']);
+    const aliases = [['real', 'linked'], ['linked', 'real']];
+    for (const include of aliases) {
+      for (const exclude of [undefined, ['real'], ['linked'], ['real', 'linked']]) {
+        const config = { include, ...(exclude === undefined ? {} : { exclude }) };
+        expect(parse(config), JSON.stringify({ config, secured: parse(config), official: official(config) })).toEqual(official(config));
+      }
+    }
     const snapshot = await snapshotFrom(root);
     expect(snapshot.sourceFiles.filter((file) => file.projectRelativePath.includes('linked.ts'))).toHaveLength(1);
     expect(snapshot.fragments.filter((fragment) => fragment.displayName === 'linkedFunction')).toHaveLength(1);

@@ -238,15 +238,18 @@ export class SecureTypeScriptSystem {
       if (extensions.length > 0 && !extensions.includes(extname(file))) return false;
       const pathFromRoot = normalize(relative(root, file));
       if (depth !== undefined && pathFromRoot.split('/').length - 1 > depth) return false;
-      return includePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions)) &&
-        !excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
+      return includePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
     });
     const canonicalOwners = new Set<string>();
-    return selected.filter((file) => {
+    const owners = selected.filter((file) => {
       const canonical = this.canonicalIdentity(file);
       if (canonical === undefined || canonicalOwners.has(canonical)) return false;
       canonicalOwners.add(canonical);
       return true;
+    });
+    return owners.filter((file) => {
+      const pathFromRoot = normalize(relative(root, file));
+      return !excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
     });
   };
 
