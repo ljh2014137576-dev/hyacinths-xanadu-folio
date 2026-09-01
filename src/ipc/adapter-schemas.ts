@@ -70,6 +70,7 @@ const relationSchema = z.object({
   loopRegionId: idSchema.optional(),
   evidence: z.array(z.object({ kind: z.enum(['type-checker', 'alias', 'call-signature', 'manual', 'revision']), detail: z.string() })),
   adapter: adapterProvenanceSchema,
+  identity: z.object({ recipeVersion: z.literal(1), callFingerprint: idSchema, occurrence: z.number().int().nonnegative() }),
 });
 const controlEdgeSchema = z.object({ id: idSchema, kind: z.enum(['entry', 'back', 'continue']), source: anchorSchema, target: anchorSchema });
 const exitEdgeSchema = z.object({ id: idSchema, reason: z.enum(['condition-false', 'break', 'return', 'throw', 'normal-function-exit']), source: anchorSchema, target: anchorSchema.optional() });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AdapterIndexSnapshot } from '../../adapter-api/index.js';
 import { createBusinessNode, moveBusinessMember, setBusinessNodeCollapsed } from '../../business-node/index.js';
-import { buildBusinessNodeFlowPage, buildFlowPage, projectBranchView, relationsForPage, setBranchFilter, toggleFlowRelation } from '../../index-core/index.js';
+import { buildBusinessNodeFlowPage, buildFlowPage, projectBranchView, relationsForPage, resolvePendingMigration, setBranchFilter, toggleFlowRelation } from '../../index-core/index.js';
 import {
   type BusinessNode,
   type FlowPage,
@@ -336,6 +336,10 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
     commit({ ...userState, businessNodes: userState.businessNodes.map((item) => item.id === node.id ? node : item) });
   };
 
+  const actOnMigration = (migrationId: string, action: { readonly kind: 'confirm'; readonly candidateId: string } | { readonly kind: 'keep-stale' } | { readonly kind: 'remove' }): void => {
+    commit(resolvePendingMigration(userState, migrationId, action));
+  };
+
   const projectRail = (
     <aside className="project-rail" aria-label="项目目录">
       <div className="rail-heading"><span>PROJECT</span><strong>{props.workspace.displayName}</strong></div>
@@ -428,7 +432,7 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
             <div className="zoom-controls"><button type="button" aria-label="缩小" onClick={() => updatePage({ ...activePage, viewport: { ...activePage.viewport, zoom: Math.max(0.65, activePage.viewport.zoom - 0.1) } })}>−</button><span>{Math.round(activePage.viewport.zoom * 100)}%</span><button type="button" aria-label="放大" onClick={() => updatePage({ ...activePage, viewport: { ...activePage.viewport, zoom: Math.min(1.5, activePage.viewport.zoom + 0.1) } })}>＋</button></div>
           </>
         )}
-        <div className="toolbar-status"><span className={`status-dot status-dot--${props.snapshot.health.status}`} />{props.snapshot.manifest.displayName} {props.snapshot.manifest.adapterVersion}<small>{props.relocationWarnings > 0 ? `${props.relocationWarnings} 个来源需要确认` : props.indexStatus === 'partial' ? '部分索引 · 查看诊断' : saveStatus === 'saving' ? '保存中…' : saveStatus === 'error' ? '保存失败' : '本地已保存'}</small></div>
+        <div className="toolbar-status"><span className={`status-dot status-dot--${props.snapshot.health.status}`} />{props.snapshot.manifest.displayName} {props.snapshot.manifest.adapterVersion}<small>{(userState.pendingMigrations?.length ?? props.relocationWarnings) > 0 ? `${userState.pendingMigrations?.length ?? props.relocationWarnings} 个来源需要确认` : props.indexStatus === 'partial' ? '部分索引 · 查看诊断' : saveStatus === 'saving' ? '保存中…' : saveStatus === 'error' ? '保存失败' : '本地已保存'}</small></div>
         <button type="button" className="button-secondary" onClick={props.onChooseAnother}>切换项目</button>
       </header>
 
@@ -457,6 +461,7 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
           <aside className="inspector" aria-label="关系与来源详情">
             <header><span>LANGUAGE ADAPTER</span><h2>{props.snapshot.manifest.displayName}</h2><p>{props.snapshot.health.status} · Compiler {props.snapshot.manifest.compilerVersion}</p></header>
             <dl><div><dt>符号</dt><dd>{props.snapshot.manifest.capabilities.symbols}</dd></div><div><dt>引用</dt><dd>{props.snapshot.manifest.capabilities.references}</dd></div><div><dt>循环</dt><dd>{props.snapshot.manifest.capabilities.loops ? '支持' : '不支持'}</dd></div></dl>
+            {(userState.pendingMigrations?.length ?? 0) > 0 && <section className="migration-list"><h3>来源迁移需要确认</h3>{userState.pendingMigrations?.map((migration) => <article key={migration.id}><strong>{migration.kind} · {migration.status}</strong><code>{migration.previousId}</code>{migration.evidence.map((evidence) => <p key={evidence}>{evidence}</p>)}{migration.candidates.map((candidate) => <button type="button" key={candidate} onClick={() => actOnMigration(migration.id, { kind: 'confirm', candidateId: candidate })}>确认候选 · {candidate}</button>)}<div><button type="button" onClick={() => actOnMigration(migration.id, { kind: 'keep-stale' })}>保留 stale</button><button type="button" onClick={() => actOnMigration(migration.id, { kind: 'remove' })}>移除引用</button></div></article>)}</section>}
             {props.snapshot.diagnostics.length > 0 && <section className="diagnostic-list"><h3>可恢复诊断 · {props.snapshot.diagnostics.length}</h3>{props.snapshot.diagnostics.slice(0, 8).map((diagnostic) => <p key={diagnostic.id}><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span></p>)}</section>}
             {selectedRelation === undefined ? <p className="inspector-empty">点击源码中的调用范围或桥梁，查看解析证据。</p> : <RelationInspector relation={selectedRelation} snapshot={props.snapshot} />}
           </aside>

@@ -29,7 +29,7 @@ import type { IndexProgress } from '../src/adapter-api/index.js';
 import { parseUserWorkspaceState } from '../src/model/index.js';
 import { JsonStorage } from '../src/storage/json-storage.js';
 import { isTrustedSenderUrl } from '../src/ipc/security.js';
-import { relocateFunctionFragments } from '../src/adapter-api/relocation.js';
+import { relocateFunctionFragments, relocateRelationBridges } from '../src/adapter-api/relocation.js';
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 interface WorkspaceRecord {
@@ -201,13 +201,36 @@ const installIpcHandlers = (): void => {
     const parsed = indexWorkspaceRequestSchema.parse(request);
     const workspace = getWorkspace(parsed.handle);
     const previousCache = await workspace.storage.loadIndexCache();
+    const pendingJournal = await workspace.storage.loadRelocationJournal();
     const result = await runUtilityIndex(workspace.rootPath, parsed.requestId, (progress) => {
       event.sender.send(IPC_CHANNELS.indexProgress, { requestId: parsed.requestId, progress });
     });
     if (result.status === 'completed' || result.status === 'partial') {
-      const relocation = previousCache === undefined ? [] : relocateFunctionFragments(previousCache.fragments, result.snapshot.fragments);
+      const relocation = pendingJournal?.symbolRelocation ?? (previousCache === undefined ? [] : relocateFunctionFragments(previousCache.fragments, result.snapshot.fragments));
+      const relationRelocation = pendingJournal?.relationRelocation ?? (previousCache === undefined ? [] : relocateRelationBridges(
+        previousCache.relations,
+        result.snapshot.relations,
+        relocation,
+        previousCache.sourceContents,
+        result.snapshot.sourceContents,
+      ));
+      const hasMigrationWork = [...relocation, ...relationRelocation].some((match) => match.status !== 'matched' || match.previousId !== match.currentId);
+      const relocationJournalId = pendingJournal?.id ?? (hasMigrationWork ? randomUUID() : undefined);
+      if (relocationJournalId !== undefined && pendingJournal === undefined) {
+        await workspace.storage.saveRelocationJournal({
+          id: relocationJournalId,
+          symbolRelocation: relocation,
+          relationRelocation,
+          createdAt: new Date().toISOString(),
+        });
+      }
       if (result.status === 'completed') await workspace.storage.saveIndexCache(result.snapshot);
-      return { ...result, relocation };
+      return {
+        ...result,
+        relocation,
+        relationRelocation,
+        ...(relocationJournalId === undefined ? {} : { relocationJournalId }),
+      };
     }
     return result;
   });
@@ -229,7 +252,12 @@ const installIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.saveUserState, async (event, request: unknown) => {
     assertTrustedRequest(event);
     const parsed = saveUserStateRequestSchema.parse(request);
-    return getWorkspace(parsed.handle).storage.saveUserState(parseUserWorkspaceState(parsed.state), parsed.generation);
+    const workspace = getWorkspace(parsed.handle);
+    const saved = await workspace.storage.saveUserState(parseUserWorkspaceState(parsed.state), parsed.generation);
+    if (saved.status === 'saved' && parsed.acknowledgeRelocationJournal !== undefined) {
+      await workspace.storage.clearRelocationJournal(parsed.acknowledgeRelocationJournal);
+    }
+    return saved;
   });
 
   ipcMain.handle(IPC_CHANNELS.clearIndexCache, async (event, request: unknown) => {

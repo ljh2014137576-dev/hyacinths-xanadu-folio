@@ -37,6 +37,8 @@ const safePattern = (rootDirectory: string, pattern: string, workspaceRoot: stri
   return isContained(workspaceRoot, resolve(rootDirectory, prefix.length === 0 ? '.' : prefix));
 };
 
+const typeScriptWildcardPattern = (pattern: string): string => pattern.replaceAll('[', '\\[').replaceAll(']', '\\]');
+
 export class SecureTypeScriptSystem {
   readonly rootPath: string;
   readonly violations: WorkspacePathViolation[] = [];
@@ -102,27 +104,43 @@ export class SecureTypeScriptSystem {
   async prepareProjectFileIndex(
     signal: AbortSignal,
     onProgress: (completedFiles: number) => void = () => undefined,
+    configuredExcludedDirectories: ReadonlySet<string> = new Set(),
   ): Promise<void> {
     if (this.prepared) return;
-    const excludedDirectories = new Set(['.git', '.tmp', 'node_modules', 'dist', 'dist-electron', 'build', 'out', 'coverage', 'vendor', 'generated', 'test-results', 'playwright-report']);
+    const excludedDirectories = new Set(['.git', '.tmp', 'node_modules', ...configuredExcludedDirectories]);
     const files: string[] = [];
-    const queue = [this.rootPath];
+    const queue: { readonly logicalPath: string; readonly ancestry: ReadonlySet<string> }[] = [{
+      logicalPath: this.rootPath,
+      ancestry: new Set([this.rootPath]),
+    }];
     let processedEntries = 0;
     while (queue.length > 0) {
       if (signal.aborted) throw new Error('Workspace enumeration cancelled');
       const directory = queue.shift();
       if (directory === undefined) continue;
-      const entries = await fs.readdir(directory, { withFileTypes: true });
+      const entries = await fs.readdir(directory.logicalPath, { withFileTypes: true });
       for (const entry of entries) {
         if (signal.aborted) throw new Error('Workspace enumeration cancelled');
-        const candidate = resolve(directory, entry.name);
+        const candidate = resolve(directory.logicalPath, entry.name);
+        if (excludedDirectories.has(entry.name) && (entry.isDirectory() || entry.isSymbolicLink())) continue;
         if (entry.isSymbolicLink()) {
           const target = realpathSync.native(candidate);
-          if (!isContained(this.rootPath, target)) this.record('WORKSPACE_SYMLINK_ESCAPE', candidate);
+          if (!isContained(this.rootPath, target)) {
+            this.record('WORKSPACE_SYMLINK_ESCAPE', candidate);
+            continue;
+          }
+          const targetDetails = statSync(candidate);
+          if (targetDetails.isFile()) files.push(candidate);
+          if (targetDetails.isDirectory() && !directory.ancestry.has(target)) {
+            queue.push({ logicalPath: candidate, ancestry: new Set([...directory.ancestry, target]) });
+          }
           continue;
         }
         if (entry.isDirectory()) {
-          if (!excludedDirectories.has(entry.name)) queue.push(candidate);
+          const realDirectory = realpathSync.native(candidate);
+          if (!directory.ancestry.has(realDirectory)) {
+            queue.push({ logicalPath: candidate, ancestry: new Set([...directory.ancestry, realDirectory]) });
+          }
         } else if (entry.isFile()) {
           files.push(candidate);
         }
@@ -139,10 +157,11 @@ export class SecureTypeScriptSystem {
   }
 
   private expandDirectoryPattern(root: string, pattern: string): string {
-    const normalized = normalize(pattern).replace(/^\.\//, '').replace(/\/$/, '');
+    const absolutePattern = isAbsolute(pattern) || /^[A-Za-z]:[\\/]/.test(pattern);
+    const normalized = normalize(absolutePattern ? relative(root, pattern) : pattern).replace(/^\.\//, '').replace(/\/$/, '');
     if (/[*?]/.test(normalized)) return normalized;
     const candidate = resolve(root, normalized.length === 0 ? '.' : normalized);
-    return this.directoryExists(candidate) ? `${normalized}/**/*` : normalized;
+    return this.directoryExists(candidate) ? normalized === '.' || normalized.length === 0 ? '**/*' : `${normalized}/**/*` : normalized;
   }
 
   readonly fileExists = (fileName: string): boolean => {
@@ -188,14 +207,21 @@ export class SecureTypeScriptSystem {
       return safe;
     });
     const safeExcludes = (excludes ?? []).filter((pattern) => safePattern(root, pattern, this.rootPath));
-    const includePatterns = safeIncludes.map((pattern) => this.expandDirectoryPattern(root, pattern));
-    const excludePatterns = safeExcludes.map((pattern) => this.expandDirectoryPattern(root, pattern));
+    const includePatterns = safeIncludes.map((pattern) => typeScriptWildcardPattern(this.expandDirectoryPattern(root, pattern)));
+    const excludePatterns = safeExcludes.map((pattern) => typeScriptWildcardPattern(this.expandDirectoryPattern(root, pattern)));
     return this.projectFiles.filter((file) => {
       if (!isContained(root, file)) return false;
       if (extensions.length > 0 && !extensions.includes(extname(file))) return false;
       const pathFromRoot = normalize(relative(root, file));
       if (depth !== undefined && pathFromRoot.split('/').length - 1 > depth) return false;
-      const matchOptions = { dot: true, nocase: !ts.sys.useCaseSensitiveFileNames } as const;
+      const matchOptions = {
+        dot: false,
+        nocase: !ts.sys.useCaseSensitiveFileNames,
+        nobrace: true,
+        noext: true,
+        nonegate: true,
+        nocomment: true,
+      } as const;
       if (!includePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions))) return false;
       return !excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
     });

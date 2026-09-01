@@ -51,15 +51,21 @@ export function App(): React.JSX.Element {
       }
       if (indexResult.status === 'failed') throw new Error(indexResult.message);
       const relocation = indexResult.relocation ?? [];
-      const migration = migrateUserAssets(restored, relocation);
-      const identityChanged = relocation.some((match) => match.status === 'matched' && match.previousId !== match.currentId);
-      const migratedState = identityChanged ? rebuildMigratedFlowPages(migration.state, indexResult.snapshot) : migration.state;
+      const relationRelocation = indexResult.relationRelocation ?? [];
+      const migration = migrateUserAssets(restored, relocation, relationRelocation);
+      const hasMigrationWork = indexResult.relocationJournalId !== undefined;
+      const migratedState = hasMigrationWork ? rebuildMigratedFlowPages(migration.state, indexResult.snapshot) : migration.state;
       setSnapshot(indexResult.snapshot);
       setIndexStatus(indexResult.status);
       setUserState(migratedState);
-      setRelocationWarnings(migration.unresolved.length);
-      if (identityChanged) {
-        await window.xanadu.saveUserState({ handle: selected.handle, generation: Date.now(), state: migratedState });
+      setRelocationWarnings(migratedState.pendingMigrations?.length ?? 0);
+      if (hasMigrationWork) {
+        await window.xanadu.saveUserState({
+          handle: selected.handle,
+          generation: Date.now(),
+          state: migratedState,
+          acknowledgeRelocationJournal: indexResult.relocationJournalId,
+        });
       }
       setProgress({
         phase: 'persist',

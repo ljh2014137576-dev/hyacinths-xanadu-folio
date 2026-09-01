@@ -4,10 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceView } from '../../src/renderer/components/WorkspaceView.js';
 import { testSnapshot } from '../fixtures/adapter-snapshot.js';
 import type { AdapterIndexSnapshot } from '../../src/adapter-api/index.js';
+import { buildFlowPage } from '../../src/index-core/index.js';
+import type { UserWorkspaceState } from '../../src/model/index.js';
 
 describe('WorkspaceView interactions', () => {
   it('shares FlowPage state across modes, filters branches and controls the overlay drawer', async () => {
-    const persist = vi.fn((_state, generation: number) => Promise.resolve({ status: 'saved' as const, generation }));
+    const persist = vi.fn((_state: UserWorkspaceState, generation: number) => Promise.resolve({ status: 'saved' as const, generation }));
     render(<WorkspaceView workspace={{ handle: '00000000-0000-4000-8000-000000000000', displayName: 'order-service' }} snapshot={testSnapshot} initialState={{ schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [] }} indexStatus="completed" relocationWarnings={0} onPersist={persist} onChooseAnother={() => undefined} />);
     expect(screen.getByRole('navigation', { name: '项目目录树' })).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole('button', { name: /createOrder/ })[0] ?? (() => { throw new Error('entry button missing'); })());
@@ -27,7 +29,7 @@ describe('WorkspaceView interactions', () => {
   });
 
   it('creates a persisted non-nested BusinessNode from multiple functions', async () => {
-    const persist = vi.fn((_state, generation: number) => Promise.resolve({ status: 'saved' as const, generation }));
+    const persist = vi.fn((_state: UserWorkspaceState, generation: number) => Promise.resolve({ status: 'saved' as const, generation }));
     render(<WorkspaceView workspace={{ handle: '00000000-0000-4000-8000-000000000000', displayName: 'order-service' }} snapshot={testSnapshot} initialState={{ schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [] }} indexStatus="completed" relocationWarnings={0} onPersist={persist} onChooseAnother={() => undefined} />);
     await userEvent.click(screen.getByLabelText('选择 createOrder'));
     await userEvent.click(screen.getByLabelText('选择 shipOrder'));
@@ -48,11 +50,37 @@ describe('WorkspaceView interactions', () => {
     const original = testSnapshot.relations[0];
     if (original === undefined || original.resolution.status !== 'resolved') throw new Error('fixture relation missing');
     const snapshot: AdapterIndexSnapshot = { ...testSnapshot, relations: [{ ...original, resolution: { ...original.resolution, certainty: 'probable' } }, ...testSnapshot.relations.slice(1)] };
-    const persist = vi.fn((_state, generation: number) => Promise.resolve({ status: 'saved' as const, generation }));
+    const persist = vi.fn((_state: UserWorkspaceState, generation: number) => Promise.resolve({ status: 'saved' as const, generation }));
     render(<WorkspaceView workspace={{ handle: '00000000-0000-4000-8000-000000000000', displayName: 'order-service' }} snapshot={snapshot} initialState={{ schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [] }} indexStatus="completed" relocationWarnings={0} onPersist={persist} onChooseAnother={() => undefined} />);
     await userEvent.click(screen.getAllByRole('button', { name: /createOrder/ })[0] ?? (() => { throw new Error('entry missing'); })());
     await userEvent.click(screen.getByRole('button', { name: /展开 可能目标 · shipOrder/ }));
     expect(screen.getByText('resolved · probable')).toBeInTheDocument();
     expect(screen.getAllByText(/可能目标 · shipOrder/).length).toBeGreaterThan(1);
+  });
+
+  it('shows persisted ambiguous evidence and offers confirm/keep/remove actions', async () => {
+    const entry = testSnapshot.fragments.find((fragment) => fragment.displayName === 'createOrder');
+    const candidate = testSnapshot.fragments.find((fragment) => fragment.displayName === 'shipOrder');
+    if (entry === undefined || candidate === undefined) throw new Error('migration fixture missing');
+    const page = buildFlowPage(testSnapshot, entry.id);
+    const initialState = {
+      schemaVersion: 1 as const,
+      flowPages: [page], businessNodes: [], recentFlowPageIds: [page.id],
+      pendingMigrations: [{
+        id: 'migration:symbol:old', kind: 'symbol' as const, status: 'ambiguous' as const,
+        previousId: 'symbol:old', candidates: [candidate.id], evidence: ['qualified signature candidates'],
+        createdAt: '2026-09-01T00:00:00.000Z',
+      }],
+    };
+    const persist = vi.fn((_state: UserWorkspaceState, generation: number) => Promise.resolve({ status: 'saved' as const, generation }));
+    render(<WorkspaceView workspace={{ handle: '00000000-0000-4000-8000-000000000000', displayName: 'order-service' }} snapshot={testSnapshot} initialState={initialState} indexStatus="completed" relocationWarnings={1} onPersist={persist} onChooseAnother={() => undefined} />);
+    expect(screen.getByText('qualified signature candidates')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /确认候选/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保留 stale' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '移除引用' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /确认候选/ }));
+    expect(persist).toHaveBeenCalled();
+    const savedState = persist.mock.calls.at(-1)?.[0];
+    expect(savedState?.pendingMigrations).toEqual([]);
   });
 });

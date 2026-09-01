@@ -64,4 +64,34 @@ describe('JsonStorage user assets and rebuildable cache', () => {
     expect(olderResult.status).toBe('stale');
     expect((await storage.loadUserState()).recentFlowPageIds).toEqual([flowPageId('flow:newer')]);
   });
+
+  it('keeps relocation journal across cache replacement/crash until explicit acknowledgement', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'xanadu-relocation-journal-'));
+    temporaryRoots.push(root);
+    const snapshot = await indexTypeScriptProject(resolve('fixtures/order-service'));
+    const storage = new JsonStorage(root, 'fixture-workspace');
+    const journal = {
+      id: 'journal-1',
+      symbolRelocation: [{ status: 'ambiguous' as const, previousId: 'symbol:old', candidates: ['symbol:a', 'symbol:b'], evidence: ['two candidates'] }],
+      relationRelocation: [{ status: 'missing' as const, previousId: 'relation:old', evidence: ['call removed'] }],
+      createdAt: '2026-09-01T00:00:00.000Z',
+    };
+    await storage.saveRelocationJournal(journal);
+    await storage.saveIndexCache(snapshot);
+    const afterCrash = new JsonStorage(root, 'fixture-workspace');
+    expect(await afterCrash.loadRelocationJournal()).toEqual(journal);
+    const pendingState: UserWorkspaceState = {
+      schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [],
+      pendingMigrations: [{
+        id: 'migration:symbol:symbol:old', kind: 'symbol', status: 'ambiguous', previousId: 'symbol:old',
+        candidates: ['symbol:a', 'symbol:b'], evidence: ['two candidates'], createdAt: '2026-09-01T00:00:00.000Z',
+      }],
+    };
+    await afterCrash.saveUserState(pendingState, 1);
+    expect((await new JsonStorage(root, 'fixture-workspace').loadUserState()).pendingMigrations).toEqual(pendingState.pendingMigrations);
+    await afterCrash.clearRelocationJournal('wrong-id');
+    expect(await afterCrash.loadRelocationJournal()).toEqual(journal);
+    await afterCrash.clearRelocationJournal(journal.id);
+    expect(await afterCrash.loadRelocationJournal()).toBeUndefined();
+  });
 });

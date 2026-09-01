@@ -145,6 +145,11 @@ export interface RelationBridge {
   readonly loopRegionId?: LoopRegionId;
   readonly evidence: readonly ResolutionEvidence[];
   readonly adapter: AdapterProvenance;
+  readonly identity: {
+    readonly recipeVersion: 1;
+    readonly callFingerprint: string;
+    readonly occurrence: number;
+  };
 }
 
 export type IterationEstimate =
@@ -265,6 +270,17 @@ export interface UserWorkspaceState {
   readonly flowPages: readonly FlowPage[];
   readonly businessNodes: readonly BusinessNode[];
   readonly recentFlowPageIds: readonly FlowPageId[];
+  readonly pendingMigrations?: readonly PendingAssetMigration[];
+}
+
+export interface PendingAssetMigration {
+  readonly id: string;
+  readonly kind: 'symbol' | 'relation';
+  readonly status: 'ambiguous' | 'missing';
+  readonly previousId: string;
+  readonly candidates: readonly string[];
+  readonly evidence: readonly string[];
+  readonly createdAt: string;
 }
 
 const rangeSchema = z.object({
@@ -347,6 +363,15 @@ export const userWorkspaceStateSchema = z.object({
   flowPages: z.array(flowPageSchema),
   businessNodes: z.array(businessNodeSchema),
   recentFlowPageIds: z.array(z.string().min(1)),
+  pendingMigrations: z.array(z.object({
+    id: z.string().min(1),
+    kind: z.enum(['symbol', 'relation']),
+    status: z.enum(['ambiguous', 'missing']),
+    previousId: z.string().min(1),
+    candidates: z.array(z.string().min(1)),
+    evidence: z.array(z.string().min(1)),
+    createdAt: z.string().datetime(),
+  })).optional(),
 });
 
 export const parseRange = (value: unknown): TextRange => rangeSchema.parse(value);

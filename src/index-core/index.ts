@@ -1,6 +1,7 @@
 import type { AdapterIndexSnapshot, RelocationMatch } from '../adapter-api/index.js';
 import {
   flowPageId,
+  relationId,
   symbolId,
   type BranchViewFilter,
   type BusinessNode,
@@ -248,26 +249,52 @@ export const outgoingRelations = (
 
 export const migrateUserAssets = (
   state: UserWorkspaceState,
-  relocation: readonly RelocationMatch[],
+  symbolRelocation: readonly RelocationMatch[],
+  relationRelocation: readonly RelocationMatch[] = [],
 ): { readonly state: UserWorkspaceState; readonly unresolved: readonly RelocationMatch[] } => {
-  const replacements = new Map(relocation.flatMap((match) => match.status === 'matched' ? [[match.previousId, match.currentId] as const] : []));
-  const replace = (id: string): string => replacements.get(id) ?? id;
+  const symbolReplacements = new Map(symbolRelocation.flatMap((match) => match.status === 'matched' ? [[match.previousId, match.currentId] as const] : []));
+  const relationReplacements = new Map(relationRelocation.flatMap((match) => match.status === 'matched' ? [[match.previousId, match.currentId] as const] : []));
+  const replaceSymbol = (id: string): string => symbolReplacements.get(id) ?? id;
+  const replaceRelation = (id: string): string => relationReplacements.get(id) ?? id;
+  const unresolvedSymbols = symbolRelocation.filter((match) => match.status !== 'matched');
+  const unresolvedRelations = relationRelocation.filter((match) => match.status !== 'matched');
+  const pending = [...unresolvedSymbols.map((match) => ({ match, kind: 'symbol' as const })), ...unresolvedRelations.map((match) => ({ match, kind: 'relation' as const }))]
+    .map(({ match, kind }) => ({
+      id: `migration:${kind}:${match.previousId}`,
+      kind,
+      status: match.status,
+      previousId: match.previousId,
+      candidates: match.status === 'ambiguous' ? match.candidates : [],
+      evidence: match.evidence,
+      createdAt: new Date().toISOString(),
+    }));
+  const previousPending = state.pendingMigrations ?? [];
+  const pendingById = new Map([...previousPending, ...pending].map((migration) => [migration.id, migration]));
   return {
     state: {
       ...state,
       flowPages: state.flowPages.map((page) => ({
         ...page,
-        entry: page.entry.kind === 'function' ? { ...page.entry, id: replace(page.entry.id) } : page.entry,
+        entry: page.entry.kind === 'function' ? { ...page.entry, id: replaceSymbol(page.entry.id) } : page.entry,
         placements: page.placements.map((placement) => placement.kind === 'business-node'
           ? placement
-          : { ...placement, targetId: symbolId(replace(placement.targetId)) }),
+          : {
+              ...placement,
+              id: placement.kind === 'function' ? `placement:function:${replaceSymbol(placement.targetId)}` : placement.id,
+              targetId: symbolId(replaceSymbol(placement.targetId)),
+              ...(placement.viaRelationId === undefined ? {} : { viaRelationId: relationId(replaceRelation(placement.viaRelationId)) }),
+              ...(placement.cycleTargetPlacementId === undefined ? {} : { cycleTargetPlacementId: placement.cycleTargetPlacementId.replace(String(placement.targetId), replaceSymbol(placement.targetId)) }),
+            }),
+        expandedRelations: page.expandedRelations.map((id) => relationId(replaceRelation(id))),
+        ...(page.selectedRelationId === undefined ? {} : { selectedRelationId: relationId(replaceRelation(page.selectedRelationId)) }),
       })),
       businessNodes: state.businessNodes.map((node) => ({
         ...node,
-        members: node.members.map((member) => ({ ...member, fragmentId: symbolId(replace(member.fragmentId)) })),
+        members: node.members.map((member) => ({ ...member, fragmentId: symbolId(replaceSymbol(member.fragmentId)) })),
       })),
+      pendingMigrations: [...pendingById.values()],
     },
-    unresolved: relocation.filter((match) => match.status !== 'matched'),
+    unresolved: [...unresolvedSymbols, ...unresolvedRelations],
   };
 };
 
@@ -276,27 +303,32 @@ export const rebuildMigratedFlowPages = (
   snapshot: AdapterIndexSnapshot,
 ): UserWorkspaceState => ({
   ...state,
-  flowPages: state.flowPages.map((page) => {
-    const rebuilt = page.entry.kind === 'function'
-      ? (() => {
-          const fragment = snapshot.fragments.find((candidate) => candidate.id === page.entry.id);
-          return fragment === undefined ? undefined : buildFlowPage(snapshot, fragment.id, { pageName: page.name });
-        })()
-      : page.entry.kind === 'business-node'
-        ? (() => {
-            const node = state.businessNodes.find((candidate) => candidate.id === page.entry.id);
-            return node === undefined ? undefined : buildBusinessNodeFlowPage(snapshot, node);
-          })()
-        : undefined;
-    return rebuilt === undefined ? page : {
-      ...rebuilt,
-      id: page.id,
-      name: page.name,
-      mode: page.mode,
-      viewport: page.viewport,
-      collapsedRegions: page.collapsedRegions,
-      branchFilter: page.branchFilter,
-      hiddenSummary: { hiddenBranches: 0, hiddenRelations: 0, restoreAvailable: false },
-    };
-  }),
+  flowPages: state.flowPages.map((page) => ({ ...page, projectionRevision: revisionFor(snapshot) })),
 });
+
+export const resolvePendingMigration = (
+  state: UserWorkspaceState,
+  migrationId: string,
+  action: { readonly kind: 'confirm'; readonly candidateId: string } | { readonly kind: 'keep-stale' } | { readonly kind: 'remove' },
+): UserWorkspaceState => {
+  const migration = state.pendingMigrations?.find((item) => item.id === migrationId);
+  if (migration === undefined) return state;
+  let next = state;
+  if (action.kind === 'confirm') {
+    const synthetic: RelocationMatch = { status: 'matched', previousId: migration.previousId, currentId: action.candidateId, certainty: 'probable', evidence: ['user confirmed migration candidate'] };
+    next = migrateUserAssets(state, migration.kind === 'symbol' ? [synthetic] : [], migration.kind === 'relation' ? [synthetic] : []).state;
+  } else if (action.kind === 'remove') {
+    next = {
+      ...state,
+      flowPages: state.flowPages
+        .filter((page) => !(migration.kind === 'symbol' && page.entry.kind === 'function' && page.entry.id === migration.previousId))
+        .map((page) => ({
+          ...page,
+          placements: page.placements.filter((placement) => migration.kind === 'symbol' ? placement.targetId !== migration.previousId : placement.viaRelationId !== migration.previousId),
+          expandedRelations: migration.kind === 'relation' ? page.expandedRelations.filter((id) => id !== migration.previousId) : page.expandedRelations,
+        })),
+      businessNodes: state.businessNodes.map((node) => ({ ...node, members: migration.kind === 'symbol' ? node.members.filter((member) => member.fragmentId !== migration.previousId) : node.members })),
+    };
+  }
+  return { ...next, pendingMigrations: next.pendingMigrations?.filter((item) => item.id !== migrationId) ?? [] };
+};

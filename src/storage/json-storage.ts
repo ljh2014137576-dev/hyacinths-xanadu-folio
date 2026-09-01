@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { AdapterIndexSnapshot } from '../adapter-api/index.js';
+import type { AdapterIndexSnapshot, RelocationMatch } from '../adapter-api/index.js';
 import {
   createEmptyUserWorkspaceState,
   parseUserWorkspaceState,
@@ -42,6 +42,10 @@ export class JsonStorage {
 
   private get cachePath(): string {
     return join(this.rootPath, 'cache', `${this.key}.json`);
+  }
+
+  private get relocationJournalPath(): string {
+    return join(this.rootPath, 'relocation', `${this.key}.json`);
   }
 
   async loadUserState(): Promise<UserWorkspaceState> {
@@ -90,5 +94,22 @@ export class JsonStorage {
 
   async clearIndexCache(): Promise<void> {
     await fs.rm(this.cachePath, { force: true });
+  }
+
+  async saveRelocationJournal(journal: { readonly id: string; readonly symbolRelocation: readonly RelocationMatch[]; readonly relationRelocation: readonly RelocationMatch[]; readonly createdAt: string }): Promise<void> {
+    await atomicWriteJson(this.relocationJournalPath, journal);
+  }
+
+  async loadRelocationJournal(): Promise<{ readonly id: string; readonly symbolRelocation: readonly RelocationMatch[]; readonly relationRelocation: readonly RelocationMatch[]; readonly createdAt: string } | undefined> {
+    const value = await readJson(this.relocationJournalPath);
+    if (value === undefined || typeof value !== 'object' || value === null || !('id' in value) || typeof value.id !== 'string' ||
+      !('symbolRelocation' in value) || !Array.isArray(value.symbolRelocation) || !('relationRelocation' in value) || !Array.isArray(value.relationRelocation) ||
+      !('createdAt' in value) || typeof value.createdAt !== 'string') return undefined;
+    return value as { readonly id: string; readonly symbolRelocation: readonly RelocationMatch[]; readonly relationRelocation: readonly RelocationMatch[]; readonly createdAt: string };
+  }
+
+  async clearRelocationJournal(id: string): Promise<void> {
+    const current = await this.loadRelocationJournal();
+    if (current?.id === id) await fs.rm(this.relocationJournalPath, { force: true });
   }
 }

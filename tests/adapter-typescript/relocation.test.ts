@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { indexTypeScriptProject, typescriptAdapterManifest } from '../../src/adapter-typescript/index.js';
-import { relocateFunctionFragments } from '../../src/adapter-api/relocation.js';
+import { relocateFunctionFragments, relocateRelationBridges } from '../../src/adapter-api/relocation.js';
 import { createBusinessNode } from '../../src/business-node/index.js';
-import { buildBusinessNodeFlowPage, buildFlowPage, migrateUserAssets, rebuildMigratedFlowPages } from '../../src/index-core/index.js';
-import type { UserWorkspaceState } from '../../src/model/index.js';
+import { buildBusinessNodeFlowPage, buildFlowPage, migrateUserAssets, rebuildMigratedFlowPages, toggleFlowRelation } from '../../src/index-core/index.js';
+import type { RelationBridge, UserWorkspaceState } from '../../src/model/index.js';
 
 const temporaryRoots: string[] = [];
 afterEach(async () => Promise.all(temporaryRoots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))));
@@ -86,5 +86,51 @@ export function renamedB(value: number): number { return value + 1; }
     expect(missing?.previousId).toBe(original.id);
     expect(missing?.evidence.length).toBeGreaterThan(0);
     expect(typescriptAdapterManifest.capabilities.stableIds).toBe('relocatable');
+  });
+
+  it('replays expanded relations across target/body and call-site shifts without resetting unrelated pages', async () => {
+    const root = await workspace();
+    await fs.writeFile(join(root, 'src', 'target.ts'), 'export function target(value: number): number { return value + 1; }\n', 'utf8');
+    await fs.writeFile(join(root, 'src', 'root.ts'), "import { target } from './target.js';\nexport function entry(): number { return target(1); }\nexport function unrelated(): number { return 1; }\n", 'utf8');
+    const first = await indexTypeScriptProject(root);
+    const entry = first.fragments.find((fragment) => fragment.displayName === 'entry');
+    const target = first.fragments.find((fragment) => fragment.displayName === 'target');
+    const relation = entry === undefined ? undefined : first.relations.find((candidate) => candidate.sourceFragmentId === entry.id && candidate.resolution.status === 'resolved');
+    if (entry === undefined || target === undefined || relation === undefined) throw new Error('call fixture missing');
+    const legacyRelation = { ...relation, identity: undefined } as unknown as RelationBridge;
+    const expandedPage = toggleFlowRelation(buildFlowPage(first, entry.id), first, relation.id);
+    const node = createBusinessNode({ id: 'call-business', projectId: expandedPage.projectId, name: 'Call business', memberIds: [entry.id, target.id], availableFragmentIds: new Set(first.fragments.map((fragment) => fragment.id)), now: '2026-09-01T00:00:00.000Z' });
+    const businessPage = buildBusinessNodeFlowPage(first, node);
+    let state: UserWorkspaceState = { schemaVersion: 1, flowPages: [expandedPage, businessPage], businessNodes: [node], recentFlowPageIds: [expandedPage.id] };
+
+    await fs.writeFile(join(root, 'src', 'target.ts'), 'export function target(value: number): number { return value + 2; }\n', 'utf8');
+    const second = await indexTypeScriptProject(root);
+    const symbolsSecond = relocateFunctionFragments(first.fragments, second.fragments);
+    const relationsSecond = relocateRelationBridges(first.relations, second.relations, symbolsSecond);
+    expect(relocateRelationBridges([legacyRelation], second.relations, symbolsSecond, first.sourceContents, second.sourceContents)[0]?.status).toBe('matched');
+    state = rebuildMigratedFlowPages(migrateUserAssets(state, symbolsSecond, relationsSecond).state, second);
+    expect(state.flowPages[0]?.expandedRelations).toHaveLength(1);
+    expect(state.flowPages[0]?.placements).toHaveLength(2);
+    expect(state.businessNodes[0]?.members).toHaveLength(2);
+    expect(state.flowPages[1]?.entry.kind).toBe('business-node');
+
+    await fs.writeFile(join(root, 'src', 'root.ts'), "import { target } from './target.js';\nexport function entry(): number {\n  const beforeCall = 0;\n  return target(1) + beforeCall;\n}\nexport function unrelated(): number { return 2; }\n", 'utf8');
+    const third = await indexTypeScriptProject(root);
+    const symbolsThird = relocateFunctionFragments(second.fragments, third.fragments);
+    const relationsThird = relocateRelationBridges(second.relations, third.relations, symbolsThird);
+    const relationReplay = relationsThird.find((match) => match.previousId === state.flowPages[0]?.expandedRelations[0]);
+    expect(relationReplay?.status).toBe('matched');
+    state = rebuildMigratedFlowPages(migrateUserAssets(state, symbolsThird, relationsThird).state, third);
+    expect(state.flowPages[0]?.expandedRelations).toHaveLength(1);
+    expect(state.flowPages[0]?.placements).toHaveLength(2);
+    expect(state.flowPages[1]?.placements.filter((placement) => placement.kind === 'function')).toHaveLength(2);
+
+    await fs.writeFile(join(root, 'src', 'root.ts'), "import { target } from './target.js';\nexport function entry(): number {\n  const beforeCall = 0;\n  return target(1) + beforeCall;\n}\nexport function unrelated(): number { return 3; }\n", 'utf8');
+    const fourth = await indexTypeScriptProject(root);
+    const symbolsFourth = relocateFunctionFragments(third.fragments, fourth.fragments);
+    const relationsFourth = relocateRelationBridges(third.relations, fourth.relations, symbolsFourth);
+    const afterUnrelated = migrateUserAssets(state, symbolsFourth, relationsFourth).state;
+    expect(afterUnrelated.flowPages[0]?.expandedRelations).toEqual(state.flowPages[0]?.expandedRelations);
+    expect(afterUnrelated.flowPages[0]?.placements.map((placement) => placement.targetId)).toEqual(state.flowPages[0]?.placements.map((placement) => placement.targetId));
   });
 });

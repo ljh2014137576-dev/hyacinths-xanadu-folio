@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import ts from '@typescript/typescript6';
 import { SecureTypeScriptSystem, type WorkspacePathViolation } from './secure-system.js';
 import { relocateFunctionFragments } from '../adapter-api/relocation.js';
@@ -103,33 +102,30 @@ const resolveInside = (rootPath: string, projectRelativePath: string): string =>
   return candidate;
 };
 
-const collectFiles = async (rootPath: string): Promise<readonly string[]> => {
-  const collected: string[] = [];
-  const visit = async (directory: string): Promise<void> => {
-    const entries = await fs.readdir(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue;
-      const absolutePath = resolve(directory, entry.name);
-      if (entry.isDirectory()) {
-        await visit(absolutePath);
-      } else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx') || entry.name === 'tsconfig.json')) {
-        collected.push(normalizeRelativePath(relative(rootPath, absolutePath)));
-      }
-    }
-  };
-  await visit(rootPath);
-  return collected.sort();
+const collectFiles = async (
+  system: SecureTypeScriptSystem,
+  signal: AbortSignal,
+  onProgress: (progress: IndexProgress) => void,
+): Promise<readonly string[]> => {
+  const heavyDirectories = new Set(['node_modules', 'vendor', 'build', 'generated', 'dist', 'dist-electron', 'out', 'coverage']);
+  await system.prepareProjectFileIndex(signal, (completed) => onProgress({ phase: 'detect', completed, message: `检测项目文件 ${completed}` }), heavyDirectories);
+  return system.enumeratedProjectRelativePaths
+    .filter((file) => file.endsWith('.ts') || file.endsWith('.tsx') || file.endsWith('tsconfig.json'))
+    .sort();
 };
+
+const hostSystems = new WeakMap<AdapterHost, SecureTypeScriptSystem>();
 
 export const createFileSystemAdapterHost = (
   rootPath: string,
   onProgress: (progress: IndexProgress) => void = () => undefined,
+  signal: AbortSignal = new AbortController().signal,
 ): AdapterHost => {
   const secureSystem = new SecureTypeScriptSystem(rootPath);
-  return {
+  const host: AdapterHost = {
   listFiles: () => secureSystem.fileExists(resolve(secureSystem.rootPath, 'tsconfig.json'))
     ? Promise.resolve(['tsconfig.json'])
-    : collectFiles(secureSystem.rootPath),
+    : collectFiles(secureSystem, signal, onProgress),
   readFile: (projectRelativePath, expectedRevision) => {
     let candidate: string;
     try {
@@ -147,6 +143,8 @@ export const createFileSystemAdapterHost = (
   hash: sha256,
   reportProgress: onProgress,
   };
+  hostSystems.set(host, secureSystem);
+  return host;
 };
 
 const securityDiagnostic = (violation: WorkspacePathViolation, index: number): Diagnostic => ({
@@ -193,7 +191,8 @@ const declarationName = (node: ts.Node, sourceFile: ts.SourceFile): { readonly n
     const token = node.getFirstToken(sourceFile);
     return token === undefined ? null : { name: 'constructor', range: rangeOf(token, sourceFile) };
   }
-  if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && ts.isVariableDeclaration(node.parent)) {
+  if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+    (ts.isVariableDeclaration(node.parent) || ts.isPropertyDeclaration(node.parent) || ts.isPropertyAssignment(node.parent))) {
     return { name: node.parent.name.getText(sourceFile), range: rangeOf(node.parent.name, sourceFile) };
   }
   return null;
@@ -206,11 +205,29 @@ const symbolKindOf = (node: ts.Node): FunctionFragment['symbolKind'] => {
   return 'function';
 };
 
-const qualifiedName = (node: ts.Node, name: string): string => {
+const blockDiscriminator = (block: ts.Block): string | undefined => {
+  const parent = block.parent;
+  if (ts.isFunctionLike(parent) && 'body' in parent && parent.body === block) return undefined;
+  if (ts.isIfStatement(parent)) return parent.thenStatement === block ? 'block:then' : 'block:else';
+  const blocks: ts.Block[] = [];
+  ts.forEachChild(parent, (child) => { if (ts.isBlock(child)) blocks.push(child); });
+  const index = blocks.indexOf(block);
+  return `block:${Math.max(0, index)}`;
+};
+
+const qualifiedName = (node: ts.Node, name: string, sourceFile: ts.SourceFile): string => {
   const containers: string[] = [];
   let current: ts.Node | undefined = node.parent;
   while (current !== undefined) {
-    if (ts.isClassDeclaration(current) && current.name !== undefined) containers.unshift(current.name.text);
+    let container: string | undefined;
+    if (ts.isModuleDeclaration(current)) container = current.name.getText(sourceFile).replace(/^['"]|['"]$/g, '');
+    if ((ts.isClassDeclaration(current) || ts.isClassExpression(current)) && current.name !== undefined) container = current.name.text;
+    if (ts.isFunctionDeclaration(current) || ts.isMethodDeclaration(current) || ts.isGetAccessorDeclaration(current) || ts.isSetAccessorDeclaration(current) || ts.isConstructorDeclaration(current) || ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      container = declarationName(current, sourceFile)?.name;
+    }
+    if (ts.isBlock(current)) container = blockDiscriminator(current);
+    const currentDeclaresNode = (ts.isVariableDeclaration(current) || ts.isPropertyDeclaration(current) || ts.isPropertyAssignment(current)) && current.initializer === node;
+    if (!currentDeclaresNode && container !== undefined && containers[0] !== container) containers.unshift(container);
     current = current.parent;
   }
   return [...containers, name].join('.');
@@ -234,12 +251,13 @@ const extractFragments = (
     if (isSupported) {
       const named = declarationName(node, file.compiler);
       if (named !== null) {
-        const fullNode = (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && ts.isVariableDeclaration(node.parent)
+        const fullNode = (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+          (ts.isVariableDeclaration(node.parent) || ts.isPropertyDeclaration(node.parent) || ts.isPropertyAssignment(node.parent))
           ? node.parent
           : node;
         const fullRange = rangeOf(fullNode, file.compiler);
         const body = 'body' in node && node.body !== undefined ? rangeOf(node.body, file.compiler) : undefined;
-        const qualified = qualifiedName(node, named.name);
+        const qualified = qualifiedName(node, named.name, file.compiler);
         const signatureText = `${node.typeParameters?.map((parameter) => parameter.getText(file.compiler)).join(',') ?? ''}(${node.parameters.map((parameter) => `${parameter.dotDotDotToken === undefined ? '' : '...'}${parameter.name.getText(file.compiler)}${parameter.questionToken === undefined ? '' : '?'}:${parameter.type?.getText(file.compiler) ?? 'inferred'}`).join(',')}):${node.type?.getText(file.compiler) ?? 'inferred'}`;
         const signatureHash = sha256(signatureText).slice(0, 24);
         const bodyText = 'body' in node && node.body !== undefined ? node.body.getText(file.compiler).replace(/\s+/g, ' ').trim() : '';
@@ -547,6 +565,7 @@ const extractRelations = (
   projectLogicalId: string,
 ): readonly RelationBridge[] => {
   const relations: RelationBridge[] = [];
+  const occurrences = new Map<string, number>();
   const filesByCompilerPath = new Map(files.map((file) => [file.compiler.fileName, file]));
   for (const file of files) {
     const visit = (node: ts.Node): void => {
@@ -559,13 +578,19 @@ const extractRelations = (
             .filter((loop) => loop.body.sourceFileId === file.model.id && loop.body.range.start <= callRange.start && loop.body.range.end >= callRange.end)
             .sort((left, right) => (left.body.range.end - left.body.range.start) - (right.body.range.end - right.body.range.start))[0];
           const branchContext = nearestBranch(node, file.compiler);
-          const idInput = `${projectLogicalId}:${file.model.projectRelativePath}:${callRange.start}:${node.kind}`;
+          const kind = ts.isNewExpression(node) ? 'construct' : 'call';
+          const argumentCount = node.arguments?.length ?? 0;
+          const callFingerprint = sha256(`${kind}:${node.expression.getText(file.compiler)}:${argumentCount}`).slice(0, 24);
+          const occurrenceKey = `${owner.fragment.id}:${callFingerprint}`;
+          const occurrence = occurrences.get(occurrenceKey) ?? 0;
+          occurrences.set(occurrenceKey, occurrence + 1);
+          const idInput = `${projectLogicalId}:${owner.fragment.id}:${kind}:${callFingerprint}:${occurrence}`;
           relations.push({
             id: relationId(`relation:${sha256(idInput).slice(0, 24)}`),
             projectId: projectId(projectLogicalId),
             sourceFragmentId: owner.fragment.id,
             callSite: sourceAnchor(file.model, callRange),
-            kind: ts.isNewExpression(node) ? 'construct' : 'call',
+            kind,
             resolution: resolved.resolution,
             ...(branchContext === undefined ? {} : { branchContext }),
             ...(containingLoop === undefined ? {} : { loopRegionId: containingLoop.id }),
@@ -575,6 +600,7 @@ const extractRelations = (
               adapterVersion: typescriptAdapterManifest.adapterVersion,
               coreApiVersion: CORE_API_VERSION,
             },
+            identity: { recipeVersion: 1, callFingerprint, occurrence },
           });
         }
       }
@@ -626,6 +652,7 @@ class TypeScriptSession implements AdapterSession {
     private readonly projectLogicalId: string,
     private readonly configuration: string,
     private readonly host: AdapterHost,
+    private readonly sessionSystem?: SecureTypeScriptSystem,
   ) {}
 
   async index(request: IndexRequest, sink: IndexEventSink, context: AdapterCallContext): Promise<IndexSummary> {
@@ -634,19 +661,33 @@ class TypeScriptSession implements AdapterSession {
     await this.host.readFile(this.configuration);
     await yieldToEventLoop();
     if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics: [] };
-    const secureSystem = new SecureTypeScriptSystem(this.rootPath);
+    const secureSystem = this.sessionSystem ?? new SecureTypeScriptSystem(this.rootPath);
+    const configPath = resolveInside(secureSystem.rootPath, this.configuration);
+    const config = ts.readConfigFile(configPath, secureSystem.readFile);
+    const configObject = typeof config.config === 'object' && config.config !== null ? config.config as Record<string, unknown> : {};
+    const compilerOptionsObject = typeof configObject['compilerOptions'] === 'object' && configObject['compilerOptions'] !== null
+      ? configObject['compilerOptions'] as Record<string, unknown>
+      : {};
+    const excludedCandidates = [
+      ...(Array.isArray(configObject['exclude']) ? configObject['exclude'].filter((value): value is string => typeof value === 'string') : []),
+      ...(typeof compilerOptionsObject['outDir'] === 'string' ? [compilerOptionsObject['outDir']] : []),
+    ];
+    const configuredExcludedDirectories = new Set(excludedCandidates.flatMap((candidate) => {
+      const normalized = candidate.replaceAll('\\', '/').replace(/^\.\//, '');
+      if (normalized.includes('*') || normalized.includes('?') || normalized.startsWith('../')) return [];
+      const segments = normalized.split('/').filter((segment) => segment.length > 0);
+      return segments.length === 1 && segments[0] !== undefined ? [segments[0]] : [];
+    }));
     try {
       await secureSystem.prepareProjectFileIndex(context.signal, (completed) => this.host.reportProgress({
         phase: 'read',
         completed,
         message: `枚举受控项目文件 ${completed}`,
-      }));
+      }), configuredExcludedDirectories);
     } catch (error: unknown) {
       if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics: [] };
       throw error;
     }
-    const configPath = resolveInside(secureSystem.rootPath, this.configuration);
-    const config = ts.readConfigFile(configPath, secureSystem.readFile);
     const diagnostics: Diagnostic[] = [];
     if (request.changedFiles !== undefined && request.changedFiles.length > 0) {
       diagnostics.push({
@@ -664,7 +705,7 @@ class TypeScriptSession implements AdapterSession {
       sink.emit({ type: 'diagnostics', diagnostics });
       return { status: 'failed', filesIndexed: 0, diagnostics };
     }
-    const parsed = ts.parseJsonConfigFileContent(config.config, secureSystem.createParseConfigHost(), secureSystem.rootPath, undefined, configPath);
+    const parsed = ts.parseJsonConfigFileContent(config.config, secureSystem.createParseConfigHost(), dirname(configPath), undefined, configPath);
     await yieldToEventLoop();
     if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics };
     const program = ts.createProgram({
@@ -698,6 +739,23 @@ class TypeScriptSession implements AdapterSession {
     });
     this.files = new Map(fileRecords.map((file) => [file.model.id, file]));
     this.fragments = fileRecords.flatMap((file) => extractFragments(file, this.projectLogicalId, now));
+    const symbolCounts = new Map<string, number>();
+    this.fragments.forEach((record) => symbolCounts.set(record.fragment.id, (symbolCounts.get(record.fragment.id) ?? 0) + 1));
+    const collisions = [...symbolCounts.entries()].filter(([, count]) => count > 1);
+    if (collisions.length > 0) {
+      const collisionDiagnostics: Diagnostic[] = collisions.map(([id], index) => ({
+        id: `diagnostic:symbol-collision:${index}`,
+        code: 'SYMBOL_ID_COLLISION',
+        severity: 'error',
+        phase: 'bind',
+        scope: 'symbol',
+        recoverability: 'fatal',
+        message: `Stable symbol identity collision rejected: ${id}`,
+      }));
+      diagnostics.push(...collisionDiagnostics);
+      sink.emit({ type: 'diagnostics', diagnostics: collisionDiagnostics });
+      return { status: 'failed', filesIndexed: 0, diagnostics };
+    }
     const initialLoops = extractLoops(fileRecords, this.fragments);
     const relations = extractRelations(fileRecords, this.fragments, initialLoops, program.getTypeChecker(), this.rootPath, this.projectLogicalId);
     const loops = attachLoopFunctions(initialLoops, relations);
@@ -775,11 +833,17 @@ export class TypeScriptLanguageAdapter implements LanguageAdapter {
         message: 'TypeScript project detection was cancelled',
       } });
     }
+    const configurations = request.candidateFiles.filter((file) => file === 'tsconfig.json' || file.endsWith('/tsconfig.json'));
     const evidence: DetectionEvidence[] = request.candidateFiles
-      .filter((file) => file === 'tsconfig.json' || file.endsWith('.ts') || file.endsWith('.tsx'))
-      .map((file) => ({ kind: file === 'tsconfig.json' ? 'configuration' : 'extension', projectRelativePath: file }));
-    if (request.candidateFiles.includes('tsconfig.json')) {
-      return Promise.resolve({ status: 'matched', confidence: 'exact', evidence, configurations: ['tsconfig.json'] });
+      .filter((file) => configurations.includes(file) || file.endsWith('.ts') || file.endsWith('.tsx'))
+      .map((file) => ({ kind: configurations.includes(file) ? 'configuration' : 'extension', projectRelativePath: file }));
+    if (configurations.length > 0) {
+      return Promise.resolve({
+        status: 'matched',
+        confidence: configurations.includes('tsconfig.json') ? 'exact' : 'probable',
+        evidence,
+        configurations,
+      });
     }
     if (evidence.length > 0) {
       return Promise.resolve({ status: 'limited', reason: 'TypeScript files found without tsconfig.json', evidence });
@@ -788,7 +852,7 @@ export class TypeScriptLanguageAdapter implements LanguageAdapter {
   }
 
   openSession(request: OpenSessionRequest, host: AdapterHost): Promise<AdapterSession> {
-    return Promise.resolve(new TypeScriptSession(this.rootPath, request.projectId, request.configuration ?? 'tsconfig.json', host));
+    return Promise.resolve(new TypeScriptSession(this.rootPath, request.projectId, request.configuration ?? 'tsconfig.json', host, hostSystems.get(host)));
   }
 }
 
@@ -804,7 +868,7 @@ export const indexTypeScriptProjectOperation = async (
   changedFiles?: readonly string[],
 ): Promise<ProjectIndexOperationResult> => {
   if (signal.aborted) return { status: 'cancelled' };
-  const host = createFileSystemAdapterHost(rootPath, onProgress);
+  const host = createFileSystemAdapterHost(rootPath, onProgress, signal);
   const adapter = new TypeScriptLanguageAdapter(rootPath);
   const candidateFiles = await host.listFiles(typescriptAdapterManifest.detection.filePatterns);
   if (signal.aborted) return { status: 'cancelled' };

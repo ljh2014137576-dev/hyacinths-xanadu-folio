@@ -1,5 +1,5 @@
 import type { RelocationMatch } from './index.js';
-import type { FunctionFragment } from '../model/index.js';
+import type { FunctionFragment, RelationBridge } from '../model/index.js';
 
 export const relocateFunctionFragments = (
   previous: readonly FunctionFragment[],
@@ -24,3 +24,35 @@ export const relocateFunctionFragments = (
     ? { status: 'ambiguous', previousId: oldFragment.id, candidates: ambiguous, evidence: ['multiple signature and declaration fingerprint candidates'] }
     : { status: 'missing', previousId: oldFragment.id, evidence: ['no stable ID, qualified signature, or declaration fingerprint candidate'] };
 });
+
+export const relocateRelationBridges = (
+  previous: readonly RelationBridge[],
+  current: readonly RelationBridge[],
+  symbolRelocation: readonly RelocationMatch[],
+  previousContents: Readonly<Record<string, string>> = {},
+  currentContents: Readonly<Record<string, string>> = {},
+): readonly RelocationMatch[] => {
+  const symbolMap = new Map(symbolRelocation.flatMap((match) => match.status === 'matched' ? [[match.previousId, match.currentId] as const] : []));
+  return previous.map((oldRelation) => {
+    const exact = current.find((candidate) => candidate.id === oldRelation.id);
+    if (exact !== undefined) return { status: 'matched', previousId: oldRelation.id, currentId: exact.id, certainty: 'exact', evidence: ['stable relation identity matched'] };
+    const expectedSource = symbolMap.get(oldRelation.sourceFragmentId) ?? oldRelation.sourceFragmentId;
+    const oldIdentity = (oldRelation as RelationBridge & { readonly identity?: RelationBridge['identity'] }).identity;
+    const oldCallText = previousContents[oldRelation.callSite.sourceFileId]?.slice(oldRelation.callSite.range.start, oldRelation.callSite.range.end);
+    const candidates = current.filter((candidate) => {
+      if (candidate.sourceFragmentId !== expectedSource || candidate.kind !== oldRelation.kind) return false;
+      if (oldIdentity !== undefined) {
+        return candidate.identity.callFingerprint === oldIdentity.callFingerprint && candidate.identity.occurrence === oldIdentity.occurrence;
+      }
+      const currentCallText = currentContents[candidate.callSite.sourceFileId]?.slice(candidate.callSite.range.start, candidate.callSite.range.end);
+      return oldCallText !== undefined && currentCallText === oldCallText;
+    });
+    if (candidates.length === 1 && candidates[0] !== undefined) {
+      return { status: 'matched', previousId: oldRelation.id, currentId: candidates[0].id, certainty: 'probable', evidence: ['migrated source, call fingerprint, kind, and occurrence matched'] };
+    }
+    if (candidates.length > 1) {
+      return { status: 'ambiguous', previousId: oldRelation.id, candidates: candidates.map((candidate) => candidate.id), evidence: ['multiple relation fingerprint candidates'] };
+    }
+    return { status: 'missing', previousId: oldRelation.id, evidence: ['no relation fingerprint candidate'] };
+  });
+};

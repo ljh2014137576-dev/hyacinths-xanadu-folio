@@ -58,6 +58,7 @@ describe('outgoing-only FlowPage projection', () => {
       resolution: { status: 'resolved', targetId: target, targetDefinition: { sourceFileId: file, revision, range: { start: 1, end: 2 } }, certainty: 'exact' },
       ...(arm === undefined ? {} : { branchContext: { branchId: 'branch:root', condition: 'paid', arm, label: arm } }),
       evidence: [], adapter: { adapterId: 'test', adapterVersion: '1.0.0', coreApiVersion: '1.0.0' },
+      identity: { recipeVersion: 1, callFingerprint: `fingerprint:${id}`, occurrence: 0 },
     });
     const relations = [
       makeRelation('ra', root, armA, 'A'), makeRelation('rb', root, armB, 'B'),

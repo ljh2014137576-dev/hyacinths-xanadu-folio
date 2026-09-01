@@ -3,7 +3,8 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { indexTypeScriptProjectOperation } from '../../src/adapter-typescript/index.js';
+import ts from '@typescript/typescript6';
+import { createFileSystemAdapterHost, indexTypeScriptProjectOperation } from '../../src/adapter-typescript/index.js';
 import { SecureTypeScriptSystem } from '../../src/adapter-typescript/secure-system.js';
 
 const temporaryRoots: string[] = [];
@@ -23,6 +24,57 @@ const snapshotFrom = async (root: string) => {
 };
 
 describe('TypeScript-compatible config enumeration', () => {
+  it('matches official wildcard semantics for directories, dot files, literals, excludes, extends and outDir', async () => {
+    const root = await createWorkspace({ compilerOptions: { noEmit: true, types: [] } });
+    const files = [
+      'src/a.ts', 'src/b.ts', 'src/aa.ts', 'src/.hidden.ts', 'src/{a,b}.ts', 'src/[ab].ts',
+      'src/deep/value.ts', 'src/.dot/value.ts', 'src/excluded/skip.ts', 'out/generated.ts',
+    ];
+    for (const file of files) {
+      await fs.mkdir(join(root, file.split('/').slice(0, -1).join('/')), { recursive: true });
+      await fs.writeFile(join(root, file), `export const value = ${JSON.stringify(file)};\n`, 'utf8');
+    }
+    await fs.mkdir(join(root, 'config'));
+    await fs.writeFile(join(root, 'config', 'base.json'), '{"compilerOptions":{"outDir":"../out","types":[]}}', 'utf8');
+    const cases = [
+      { include: ['src'] }, { include: ['src/*.ts'] }, { include: ['src/?.ts'] }, { include: ['src/**/*.ts'] },
+      { include: ['src/{a,b}.ts'] }, { include: ['src/@(a|b).ts'] }, { include: ['src/[ab].ts'] },
+      { include: ['src'], exclude: ['src/excluded'] }, {},
+      { extends: './config/base.json', include: ['src', 'out'] },
+    ];
+    const system = new SecureTypeScriptSystem(root);
+    await system.prepareProjectFileIndex(new AbortController().signal);
+    for (const config of cases) {
+      const official = ts.parseJsonConfigFileContent(config, ts.sys, root, undefined, join(root, 'tsconfig.json')).fileNames
+        .map((file) => file.slice(root.length + 1).replaceAll('\\', '/')).sort();
+      const secured = ts.parseJsonConfigFileContent(config, system.createParseConfigHost(), root, undefined, join(root, 'tsconfig.json')).fileNames
+        .map((file) => file.slice(root.length + 1).replaceAll('\\', '/')).sort();
+      expect(secured, JSON.stringify(config)).toEqual(official);
+    }
+  });
+
+  it('includes in-root file/directory links with logical paths and rejects external targets', async () => {
+    const root = await createWorkspace({ compilerOptions: { noEmit: true, types: [] }, include: ['linked', 'linked-file.ts', 'outside-link'] });
+    await fs.mkdir(join(root, 'real'));
+    await fs.writeFile(join(root, 'real', 'inside.ts'), 'export function linkedInside() { return 1; }\n', 'utf8');
+    await fs.symlink(join(root, 'real'), join(root, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      await fs.symlink(join(root, 'real', 'inside.ts'), join(root, 'linked-file.ts'), 'file');
+    } catch (error: unknown) {
+      if (process.platform !== 'win32' || typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'EPERM') throw error;
+      await fs.link(join(root, 'real', 'inside.ts'), join(root, 'linked-file.ts'));
+    }
+    const outside = await fs.mkdtemp(join(tmpdir(), 'xanadu-outside-link-'));
+    temporaryRoots.push(outside);
+    await fs.writeFile(join(outside, 'escape.ts'), 'export const escaped = true;\n', 'utf8');
+    await fs.symlink(outside, join(root, 'outside-link'), process.platform === 'win32' ? 'junction' : 'dir');
+    const snapshot = await snapshotFrom(root);
+    expect(snapshot.sourceFiles.some((file) => file.projectRelativePath === 'linked/inside.ts')).toBe(true);
+    expect(snapshot.sourceFiles.some((file) => file.projectRelativePath === 'linked-file.ts')).toBe(true);
+    expect(snapshot.sourceFiles.some((file) => file.projectRelativePath.includes('outside-link'))).toBe(false);
+    expect(snapshot.diagnostics.some((diagnostic) => diagnostic.code === 'WORKSPACE_SYMLINK_ESCAPE')).toBe(true);
+  });
+
   it('indexes the current repository directory includes with non-empty business symbols', async () => {
     const result = await indexTypeScriptProjectOperation(resolve('.'));
     expect(result.status).toBe('completed');
@@ -75,6 +127,20 @@ describe('TypeScript-compatible config enumeration', () => {
     expect(system.enumeratedProjectRelativePaths.some((path) => path.startsWith('node_modules/'))).toBe(false);
   });
 
+  it('allows an excluded build/vendor file to enter Program through a legal import', async () => {
+    const root = await createWorkspace({ compilerOptions: { strict: true, noEmit: true, module: 'ESNext', moduleResolution: 'Bundler', types: [] }, include: ['src'], exclude: ['build', 'vendor'] });
+    await fs.mkdir(join(root, 'src'));
+    await fs.mkdir(join(root, 'build'));
+    await fs.mkdir(join(root, 'vendor'));
+    await fs.writeFile(join(root, 'src', 'index.ts'), "import { built } from '../build/generated.js';\nimport { vendored } from '../vendor/library.js';\nexport function imported() { return built + vendored; }\n", 'utf8');
+    await fs.writeFile(join(root, 'build', 'generated.ts'), 'export const built = 1;\n', 'utf8');
+    await fs.writeFile(join(root, 'vendor', 'library.ts'), 'export const vendored = 2;\n', 'utf8');
+    const snapshot = await snapshotFrom(root);
+    expect(snapshot.sourceFiles.some((file) => file.projectRelativePath === 'build/generated.ts')).toBe(true);
+    expect(snapshot.sourceFiles.some((file) => file.projectRelativePath === 'vendor/library.ts')).toBe(true);
+    expect(snapshot.fragments.some((fragment) => fragment.displayName === 'imported')).toBe(true);
+  });
+
   it('supports cancellable batched enumeration', async () => {
     const root = await createWorkspace({ compilerOptions: { noEmit: true, types: [] }, include: ['src'] });
     await fs.mkdir(join(root, 'src'));
@@ -82,5 +148,31 @@ describe('TypeScript-compatible config enumeration', () => {
     const system = new SecureTypeScriptSystem(root);
     const controller = new AbortController();
     await expect(system.prepareProjectFileIndex(controller.signal, () => controller.abort())).rejects.toThrow('cancelled');
+  });
+
+  it('uses observable cancellable heavy-dir exclusions for no-root-config detection and reports nested config', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'xanadu-detect-'));
+    temporaryRoots.push(root);
+    await fs.mkdir(join(root, 'src'));
+    await fs.mkdir(join(root, 'build'));
+    await fs.mkdir(join(root, 'vendor'));
+    await fs.mkdir(join(root, 'nested'));
+    await fs.writeFile(join(root, 'build', 'generated.ts'), 'export const buildOnly = 1;\n', 'utf8');
+    await fs.writeFile(join(root, 'vendor', 'library.ts'), 'export const vendorOnly = 1;\n', 'utf8');
+    await fs.writeFile(join(root, 'nested', 'tsconfig.json'), JSON.stringify({ compilerOptions: { noEmit: true, types: [] }, include: ['.'] }), 'utf8');
+    await fs.writeFile(join(root, 'nested', 'entry.ts'), 'export function nestedEntry() { return 1; }\n', 'utf8');
+    await Promise.all(Array.from({ length: 150 }, (_, index) => fs.writeFile(join(root, 'src', `file-${index}.ts`), `export const detected${index} = ${index};\n`, 'utf8')));
+    const progress: number[] = [];
+    const host = createFileSystemAdapterHost(root, (event) => progress.push(event.completed));
+    const detected = await host.listFiles(['**/*.ts']);
+    expect(detected).toContain('nested/tsconfig.json');
+    expect(detected.some((file) => file.startsWith('build/') || file.startsWith('vendor/'))).toBe(false);
+    expect(progress.length).toBeGreaterThan(0);
+    const result = await indexTypeScriptProjectOperation(root);
+    expect(result.status === 'completed' && result.snapshot.fragments.some((fragment) => fragment.displayName === 'nestedEntry')).toBe(true);
+
+    const cancelledController = new AbortController();
+    const cancellingHost = createFileSystemAdapterHost(root, () => cancelledController.abort(), cancelledController.signal);
+    await expect(cancellingHost.listFiles(['**/*.ts'])).rejects.toThrow('cancelled');
   });
 });

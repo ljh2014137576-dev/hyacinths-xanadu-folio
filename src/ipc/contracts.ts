@@ -39,6 +39,7 @@ export const cancelIndexRequestSchema = z.object({ requestId: z.string().min(1).
 export const saveUserStateRequestSchema = workspaceHandleRequestSchema.extend({
   generation: z.number().int().nonnegative(),
   state: userWorkspaceStateSchema,
+  acknowledgeRelocationJournal: z.string().min(1).optional(),
 });
 export const indexProgressEnvelopeSchema = z.object({
   requestId: z.string().min(1),
@@ -58,7 +59,7 @@ export interface IndexProgressEnvelope {
 export type IndexProgressListener = (event: IndexProgressEnvelope) => void;
 
 export type IndexWorkspaceResult =
-  | { readonly status: 'completed' | 'partial'; readonly snapshot: AdapterIndexSnapshot; readonly relocation?: readonly RelocationMatch[] }
+  | { readonly status: 'completed' | 'partial'; readonly snapshot: AdapterIndexSnapshot; readonly relocation?: readonly RelocationMatch[]; readonly relationRelocation?: readonly RelocationMatch[]; readonly relocationJournalId?: string }
   | { readonly status: 'cancelled' }
   | { readonly status: 'failed'; readonly message: string };
 
@@ -67,12 +68,20 @@ export const indexWorkspaceResultSchema = z.discriminatedUnion('status', [
     z.object({ status: z.literal('matched'), previousId: z.string().min(1), currentId: z.string().min(1), certainty: z.enum(['exact', 'probable']), evidence: z.array(z.string()) }),
     z.object({ status: z.literal('ambiguous'), previousId: z.string().min(1), candidates: z.array(z.string().min(1)).min(1), evidence: z.array(z.string()).min(1) }),
     z.object({ status: z.literal('missing'), previousId: z.string().min(1), evidence: z.array(z.string()).min(1) }),
-  ])).optional() }),
+  ])).optional(), relationRelocation: z.array(z.discriminatedUnion('status', [
+    z.object({ status: z.literal('matched'), previousId: z.string().min(1), currentId: z.string().min(1), certainty: z.enum(['exact', 'probable']), evidence: z.array(z.string()) }),
+    z.object({ status: z.literal('ambiguous'), previousId: z.string().min(1), candidates: z.array(z.string().min(1)).min(1), evidence: z.array(z.string()).min(1) }),
+    z.object({ status: z.literal('missing'), previousId: z.string().min(1), evidence: z.array(z.string()).min(1) }),
+  ])).optional(), relocationJournalId: z.string().min(1).optional() }),
   z.object({ status: z.literal('partial'), snapshot: adapterIndexSnapshotSchema, relocation: z.array(z.discriminatedUnion('status', [
     z.object({ status: z.literal('matched'), previousId: z.string().min(1), currentId: z.string().min(1), certainty: z.enum(['exact', 'probable']), evidence: z.array(z.string()) }),
     z.object({ status: z.literal('ambiguous'), previousId: z.string().min(1), candidates: z.array(z.string().min(1)).min(1), evidence: z.array(z.string()).min(1) }),
     z.object({ status: z.literal('missing'), previousId: z.string().min(1), evidence: z.array(z.string()).min(1) }),
-  ])).optional() }),
+  ])).optional(), relationRelocation: z.array(z.discriminatedUnion('status', [
+    z.object({ status: z.literal('matched'), previousId: z.string().min(1), currentId: z.string().min(1), certainty: z.enum(['exact', 'probable']), evidence: z.array(z.string()) }),
+    z.object({ status: z.literal('ambiguous'), previousId: z.string().min(1), candidates: z.array(z.string().min(1)).min(1), evidence: z.array(z.string()).min(1) }),
+    z.object({ status: z.literal('missing'), previousId: z.string().min(1), evidence: z.array(z.string()).min(1) }),
+  ])).optional(), relocationJournalId: z.string().min(1).optional() }),
   z.object({ status: z.literal('cancelled') }),
   z.object({ status: z.literal('failed'), message: z.string().min(1) }),
 ]);
@@ -95,7 +104,7 @@ export interface XanaduDesktopApi {
   cancelIndex(request: { readonly requestId: string }): Promise<boolean>;
   onIndexProgress(listener: IndexProgressListener): () => void;
   loadUserState(request: { readonly handle: string }): Promise<UserWorkspaceState>;
-  saveUserState(request: { readonly handle: string; readonly generation: number; readonly state: UserWorkspaceState }): Promise<SaveUserStateResult>;
+  saveUserState(request: { readonly handle: string; readonly generation: number; readonly state: UserWorkspaceState; readonly acknowledgeRelocationJournal?: string }): Promise<SaveUserStateResult>;
   clearIndexCache(request: { readonly handle: string }): Promise<void>;
 }
 
