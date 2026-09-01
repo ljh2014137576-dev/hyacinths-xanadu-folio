@@ -392,6 +392,23 @@ export const userWorkspaceStateSchema = z.object({
     evidence: z.array(z.string().min(1)),
     keptAt: z.string().datetime(),
   })).optional(),
+}).superRefine((state, context) => {
+  const pageIds = new Set(state.flowPages.map((page) => page.id));
+  const nodeIds = new Set(state.businessNodes.map((node) => node.id));
+  for (const id of state.recentFlowPageIds) if (!pageIds.has(id)) context.addIssue({ code: 'custom', path: ['recentFlowPageIds'], message: `Unknown flow page ${id}` });
+  for (const node of state.businessNodes) {
+    if (node.members.length === 0) context.addIssue({ code: 'custom', path: ['businessNodes', node.id], message: 'Business node must have a member' });
+    for (const page of state.flowPages.filter((candidate) => candidate.entry.kind === 'business-node' && candidate.entry.id === node.id)) {
+      if (!nodeIds.has(page.entry.id)) context.addIssue({ code: 'custom', path: ['flowPages', page.id], message: 'Unknown business node entry' });
+    }
+  }
+  for (const page of state.flowPages) {
+    const placementIds = new Set(page.placements.map((placement) => placement.id));
+    for (const placement of page.placements) {
+      if (placement.cycleTargetPlacementId !== undefined && !placementIds.has(placement.cycleTargetPlacementId)) context.addIssue({ code: 'custom', path: ['flowPages', page.id, 'placements'], message: 'Cycle target must reference a placement on the same page' });
+      if (placement.viaRelationId !== undefined && !page.expandedRelations.includes(placement.viaRelationId)) context.addIssue({ code: 'custom', path: ['flowPages', page.id, 'placements'], message: 'Placement relation must be expanded on the page' });
+    }
+  }
 });
 
 export const parseRange = (value: unknown): TextRange => rangeSchema.parse(value);

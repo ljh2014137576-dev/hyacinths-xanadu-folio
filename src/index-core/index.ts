@@ -350,11 +350,14 @@ export const resolvePendingMigration = (
       ? state.businessNodes.filter((node) => node.members.some((member) => member.fragmentId === migration.previousId))
       : [];
     const removedBusinessNodeIds = new Set<string>(affectedBusinessNodes.filter((node) => node.members.length === 1).map((node) => node.id));
-    const removedPageIds = new Set(state.flowPages.filter((page) => page.entry.kind === 'business-node' && removedBusinessNodeIds.has(page.entry.id)).map((page) => page.id));
+    const removedPageIds = new Set([
+      ...state.flowPages.filter((page) => page.entry.kind === 'business-node' && removedBusinessNodeIds.has(page.entry.id)).map((page) => page.id),
+      ...state.flowPages.filter((page) => migration.kind === 'symbol' && page.entry.kind === 'function' && page.entry.id === migration.previousId).map((page) => page.id),
+    ]);
     next = {
       ...state,
       flowPages: state.flowPages
-        .filter((page) => !removedPageIds.has(page.id) && !(migration.kind === 'symbol' && page.entry.kind === 'function' && page.entry.id === migration.previousId))
+        .filter((page) => !removedPageIds.has(page.id))
         .map((page) => {
           const updated = {
           ...page,

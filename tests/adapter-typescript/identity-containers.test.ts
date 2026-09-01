@@ -81,4 +81,22 @@ export function scopes(flag: boolean) {
     expect(runs).toHaveLength(4);
     expect(new Set(runs.map((fragment) => fragment.qualifiedName)).size).toBe(4);
   });
+
+  it('distinguishes repeated catches by owning try ordinal and shape', async () => {
+    const root = await createProject(`
+export function catches(value: number) {
+  try { return value + 1; } catch (error) { const first = () => value; return first(); }
+  try { return value + 2; } catch (error) { const second = () => value; return second(); }
+  try { return value + 3; } catch (different) { const third = () => value; return third(); }
+  try { return value + 4; } catch (error) { const fourth = () => value; return fourth(); } finally { value++; }
+}
+`);
+    const result = await indexTypeScriptProjectOperation(root);
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') throw new Error('catch identity project failed');
+    const helpers = result.snapshot.fragments.filter((fragment) => ['first', 'second', 'third', 'fourth'].includes(fragment.displayName));
+    expect(helpers).toHaveLength(4);
+    expect(new Set(helpers.map((fragment) => fragment.id)).size).toBe(4);
+    expect(new Set(helpers.map((fragment) => fragment.qualifiedName)).size).toBe(4);
+  });
 });

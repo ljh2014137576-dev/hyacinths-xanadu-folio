@@ -243,7 +243,15 @@ const blockDiscriminator = (block: ts.Block, sourceFile: ts.SourceFile): string 
     const condition = conditionForLoop(parent)?.getText(sourceFile) ?? kind;
     return `loop:${structuralOrdinal(parent, parent.parent, (candidate) => ts.isIterationStatement(candidate, false))}:${sha256(normalizedSyntax(condition)).slice(0, 10)}:${kind}`;
   }
-  if (ts.isCatchClause(parent)) return `catch:${parent.variableDeclaration?.name.getText(sourceFile) ?? 'anonymous'}`;
+  if (ts.isCatchClause(parent)) {
+    const tryStatement = parent.parent;
+    const ordinal = ts.isTryStatement(tryStatement)
+      ? structuralOrdinal(tryStatement, tryStatement.parent, ts.isTryStatement)
+      : 0;
+    const variable = parent.variableDeclaration?.name.getText(sourceFile) ?? 'anonymous';
+    const shape = `${ts.isTryStatement(tryStatement) && tryStatement.finallyBlock !== undefined ? 'finally' : 'no-finally'}:${variable}`;
+    return `try:${ordinal}:${sha256(normalizedSyntax(shape)).slice(0, 10)}:catch:${variable}`;
+  }
   if (ts.isCaseClause(parent) || ts.isDefaultClause(parent)) {
     const clauseIndex = structuralOrdinal(parent, parent.parent, (candidate) => ts.isCaseClause(candidate) || ts.isDefaultClause(candidate));
     return `case:${clauseIndex}:${ts.isCaseClause(parent) ? normalizedSyntax(parent.expression.getText(sourceFile)) : 'default'}`;

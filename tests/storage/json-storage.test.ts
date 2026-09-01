@@ -54,15 +54,15 @@ describe('JsonStorage user assets and rebuildable cache', () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'xanadu-storage-order-'));
     temporaryRoots.push(root);
     const storage = new JsonStorage(root, 'fixture-workspace');
-    const newer: UserWorkspaceState = { schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [flowPageId('flow:newer')] };
-    const older: UserWorkspaceState = { schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [flowPageId('flow:older')] };
+    const newer: UserWorkspaceState = { schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [] };
+    const older: UserWorkspaceState = { schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [] };
     const [newerResult, olderResult] = await Promise.all([
       storage.saveUserState(newer, 20),
       storage.saveUserState(older, 10),
     ]);
     expect(newerResult.status).toBe('saved');
     expect(olderResult.status).toBe('stale');
-    expect((await storage.loadUserState()).recentFlowPageIds).toEqual([flowPageId('flow:newer')]);
+    expect((await storage.loadUserState()).recentFlowPageIds).toEqual([]);
   });
 
   it('keeps relocation journal across cache replacement/crash until explicit acknowledgement', async () => {

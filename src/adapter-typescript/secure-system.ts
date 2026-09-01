@@ -238,17 +238,13 @@ export class SecureTypeScriptSystem {
       if (extensions.length > 0 && !extensions.includes(extname(file))) return false;
       const pathFromRoot = normalize(relative(root, file));
       if (depth !== undefined && pathFromRoot.split('/').length - 1 > depth) return false;
-      return includePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
+      return includePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions)) &&
+        !excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
     });
-    const excludedCanonical = new Set(this.projectFiles.flatMap((file) => {
-      const pathFromRoot = normalize(relative(root, file));
-      const canonical = this.canonicalIdentity(file);
-      return excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions)) && canonical !== undefined ? [canonical] : [];
-    }));
     const canonicalOwners = new Set<string>();
     return selected.filter((file) => {
       const canonical = this.canonicalIdentity(file);
-      if (canonical === undefined || excludedCanonical.has(canonical) || canonicalOwners.has(canonical)) return false;
+      if (canonical === undefined || canonicalOwners.has(canonical)) return false;
       canonicalOwners.add(canonical);
       return true;
     });
