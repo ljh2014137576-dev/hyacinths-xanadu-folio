@@ -39,9 +39,15 @@ MVP 0.1 的首个 CodeSurface 后端使用只读 `<pre>/<code>`、精确 range s
 
 ## NFR-005：增量索引延期
 
-MVP 0.1 的 TypeScript adapter 明确声明 `incrementalUpdate=false`。它执行可取消、realpath-contained、partial-aware 的全量重建；只有 completed generation 写成功缓存。不得把 changedFiles 请求描述为增量。
+MVP 0.1 的 TypeScript adapter 明确声明 `incrementalUpdate=false`。它执行可取消、realpath-contained 的全量重建。partial generation 只作为 transient 预览，不迁移 durable assets、不写 cache/journal；只有 completed generation 才从 last-completed baseline 迁移资产并写成功缓存。不得把 changedFiles 请求描述为增量。
 
 可靠的 per-session incremental builder、affected relation invalidation 与 watcher generation ordering进入 MVP 0.2 Issue #17。只有该 Issue 的全部验收通过后才能把 capability 改为 `true`。
+
+## Identity、资产与迁移 schema
+
+MVP 0.1 使用 identity recipe v2：SymbolFragment 携带词法容器、signature/declaration fingerprint；RelationBridge 携带完整调用表达式 fingerprint、lexical path 和 occurrence 证据。旧 recipe v1 只作为安全解码输入，迁移通过 relocation candidate/evidence 执行，不静默 reinterpret。
+
+UserWorkspaceState 的 `pendingMigrations` 只包含实际被 entry、placement、BusinessNode member、expanded/selected/via 引用的 unresolved IDs；`staleAssets` 保存用户选择保留的旧 ID、previous-index provenance、evidence 和 keptAt，并由 UI 渲染占位项。relocation journal 保存 source/target 映射，采用 generation/ack 协议，保证 cache、用户资产和崩溃恢复一致。
 
 ## 后果与文档规则
 

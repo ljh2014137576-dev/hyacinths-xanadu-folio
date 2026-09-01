@@ -58,7 +58,7 @@ npm run start
 
 建议验收顺序：
 
-1. 选择 `order-service`，确认 TypeScript manifest、Compiler 版本、能力和 degraded/healthy 状态可见；fixture 的故意语法错误会产生可恢复诊断。
+1. 选择 `order-service`，确认 TypeScript manifest、Compiler 版本、能力和 degraded/healthy 状态可见。含故意语法错误的原始 fixture 会以 partial transient 预览打开；要验证 durable FlowPage/BusinessNode 恢复，请先修复该文件或选择一个无语法错误的项目。
 2. 在目录树或统一搜索中打开 `createOrder`。初始 FlowPage 只显示入口和可发现引用；点击“展开”按 RelationId 逐层加入目标，且不会加入 `unrelatedInboundCaller`。
 3. 点击调用范围或桥梁查看 resolved/ambiguous/unresolved/external 状态与 TypeChecker 证据。
 4. 点击函数标题进入原文件精确范围，再返回 FlowPage。
@@ -99,6 +99,8 @@ MVP 的显式 Vite build、HTML CodeSurface 和增量延期见 [ADR-0004](docs/a
 
 - 首版只加载随应用发布的 TypeScript adapter；任意第三方规则包安装、签名和权限模型属于后续阶段。
 - 当前 TypeScript adapter 诚实声明 `incrementalUpdate=false`；变更触发受控全量重建。取消会终止 utility process，partial/cancelled 不会保存为成功索引缓存。
+- partial generation 只作为带诊断的 transient 预览：不会迁移或保存 FlowPage/BusinessNode，也不会写入 cache/journal；只有 completed generation 才从 last-completed baseline 一次性迁移用户资产。
+- Symbol/Relation identity recipe 使用 v2；pending migrations 只针对真实用户资产引用，keep-stale 会保留可渲染的 stale asset/evidence，confirm/remove 都经过 schema 校验。
 - 持久化采用 `StoragePort` 后的原子 JSON 实现；SQLite driver 仍需单独完成 Electron ABI/打包验证。
 - 静态分析不能声称某次真实运行经过了哪条分支或循环了多少次；真实追踪属于未来运行阶段。
 - 项目自身尚未选择开源许可证。分发源码或安装包前，仓库所有者必须确定项目许可证并完成第三方 notices 审阅。
