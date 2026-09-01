@@ -74,7 +74,9 @@ export interface FunctionFragment {
     readonly declarationFingerprint: string;
     readonly lexicalFingerprint?: string;
     readonly containerFingerprint?: string;
+    /** Present on new recipe-v2 identities; optional only for persisted legacy DTOs. */
     readonly lexicalParentFingerprint?: string;
+    /** Present on new recipe-v2 identities; optional only for persisted legacy DTOs. */
     readonly containerSemanticFingerprint?: string;
   };
   readonly provenance: Provenance;
