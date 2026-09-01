@@ -69,8 +69,8 @@ describe('TypeScript-compatible config enumeration', () => {
     await fs.writeFile(join(outside, 'escape.ts'), 'export const escaped = true;\n', 'utf8');
     await fs.symlink(outside, join(root, 'outside-link'), process.platform === 'win32' ? 'junction' : 'dir');
     const snapshot = await snapshotFrom(root);
-    expect(snapshot.sourceFiles.some((file) => file.projectRelativePath === 'linked/inside.ts')).toBe(true);
-    expect(snapshot.sourceFiles.some((file) => file.projectRelativePath === 'linked-file.ts')).toBe(true);
+    const aliasFiles = snapshot.sourceFiles.filter((file) => file.projectRelativePath === 'linked/inside.ts' || file.projectRelativePath === 'linked-file.ts');
+    expect(aliasFiles, JSON.stringify(snapshot.sourceFiles.map((file) => file.projectRelativePath))).toHaveLength(1);
     expect(snapshot.sourceFiles.some((file) => file.projectRelativePath.includes('outside-link'))).toBe(false);
     expect(snapshot.diagnostics.some((diagnostic) => diagnostic.code === 'WORKSPACE_SYMLINK_ESCAPE')).toBe(true);
   });

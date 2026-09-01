@@ -769,7 +769,7 @@ class TypeScriptSession implements AdapterSession {
     const canonicalSourceFiles = new Set<string>();
     const compilerFiles = program.getSourceFiles().filter((file) => {
       if (file.isDeclarationFile || !isPathInside(this.rootPath, file.fileName) || (!file.fileName.endsWith('.ts') && !file.fileName.endsWith('.tsx'))) return false;
-      const canonical = secureSystem.canonicalPath(file.fileName);
+      const canonical = secureSystem.canonicalIdentity(file.fileName);
       if (canonical === undefined || canonicalSourceFiles.has(canonical)) return false;
       canonicalSourceFiles.add(canonical);
       return true;

@@ -64,6 +64,17 @@ export class SecureTypeScriptSystem {
     return this.validate(path, false);
   }
 
+  canonicalIdentity(path: string): string | undefined {
+    const canonical = this.canonicalPath(path);
+    if (canonical === undefined) return undefined;
+    try {
+      const details = statSync(canonical);
+      return details.ino === 0 ? canonical : `inode:${details.dev}:${details.ino.toString()}`;
+    } catch {
+      return canonical;
+    }
+  }
+
   private record(code: WorkspacePathViolation['code'], candidate: string): void {
     const key = `${code}:${candidate}`;
     if (this.violationKeys.has(key)) return;
@@ -231,12 +242,12 @@ export class SecureTypeScriptSystem {
     });
     const excludedCanonical = new Set(this.projectFiles.flatMap((file) => {
       const pathFromRoot = normalize(relative(root, file));
-      const canonical = this.canonicalPath(file);
+      const canonical = this.canonicalIdentity(file);
       return excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions)) && canonical !== undefined ? [canonical] : [];
     }));
     const canonicalOwners = new Set<string>();
     return selected.filter((file) => {
-      const canonical = this.canonicalPath(file);
+      const canonical = this.canonicalIdentity(file);
       if (canonical === undefined || excludedCanonical.has(canonical) || canonicalOwners.has(canonical)) return false;
       canonicalOwners.add(canonical);
       return true;
