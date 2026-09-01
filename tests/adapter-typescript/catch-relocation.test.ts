@@ -44,6 +44,29 @@ ${blocks.join('\n')}
 }
 `;
 
+const literalSemanticPairs = [
+  { name: 'regular expressions', first: '/a/', second: '/b/' },
+  { name: 'BigInt literals', first: '1n', second: '2n' },
+  { name: 'template head/middle/tail fragments', first: '`head-a${1}middle-a${2}tail-a`', second: '`head-b${1}middle-b${2}tail-b`' },
+] as const;
+
+type StructuralMutation = 'insertion' | 'deletion' | 'reorder';
+
+const mutatedPrograms = (first: string, second: string, mutation: StructuralMutation): { readonly before: string; readonly after: string } => {
+  if (mutation === 'insertion') return {
+    before: program(helperCatch(first), helperCatch(second)),
+    after: program(plainCatch, helperCatch(first), helperCatch(second)),
+  };
+  if (mutation === 'deletion') return {
+    before: program(plainCatch, helperCatch(first), helperCatch(second)),
+    after: program(helperCatch(first), helperCatch(second)),
+  };
+  return {
+    before: program(helperCatch(first), helperCatch(second)),
+    after: program(helperCatch(second), helperCatch(first)),
+  };
+};
+
 const helpers = (snapshot: AdapterIndexSnapshot): readonly FunctionFragment[] =>
   snapshot.fragments.filter((fragment) => fragment.displayName === 'helper');
 
@@ -106,6 +129,55 @@ describe('catch semantic identity and relocation', () => {
       .not.toBe(helperForThrow(previous, '2').identity.containerSemanticFingerprint);
     expectSameSemanticCatch(previous, current, '1');
     expectSameSemanticCatch(previous, current, '2');
+  });
+
+  it.each(literalSemanticPairs.flatMap((pair) => (['insertion', 'deletion', 'reorder'] as const).map((mutation) => ({ ...pair, mutation }))))(
+    'maps distinct $name to their actual semantic catches after $mutation',
+    async ({ first, second, mutation }) => {
+      const root = await workspace();
+      const sources = mutatedPrograms(first, second, mutation);
+      const previous = await indexSource(root, sources.before);
+      const current = await indexSource(root, sources.after);
+      expect(helperForThrow(previous, first).identity.containerSemanticFingerprint)
+        .not.toBe(helperForThrow(previous, second).identity.containerSemanticFingerprint);
+      expectSameSemanticCatch(previous, current, first);
+      expectSameSemanticCatch(previous, current, second);
+    },
+  );
+
+  it.each(literalSemanticPairs)('returns ambiguity for repeated identical $name', async ({ first }) => {
+    const root = await workspace();
+    const previous = await indexSource(root, program(
+      helperCatch(first, { leadingComment: '/* first */' }),
+      helperCatch(first, { leadingComment: '/* second */' }),
+    ));
+    const current = await indexSource(root, program(
+      helperCatch(first, { leadingComment: '/* inserted */' }),
+      helperCatch(first, { leadingComment: '/* first */' }),
+      helperCatch(first, { leadingComment: '/* second */' }),
+    ));
+    const expectedCandidates = helpers(current).map((fragment) => fragment.id).sort((left, right) => left.localeCompare(right));
+    const matches = relocateFunctionFragments(previous.fragments, current.fragments);
+    for (const oldHelper of helpers(previous)) {
+      expect(relocationFor(matches, oldHelper)).toMatchObject({ status: 'ambiguous', candidates: expectedCandidates });
+    }
+  });
+
+  it.each(literalSemanticPairs)('keeps $name exact across trivia-only edits', async ({ first, second }) => {
+    const root = await workspace();
+    const previous = await indexSource(root, program(helperCatch(first), helperCatch(second)));
+    const current = await indexSource(root, program(
+      helperCatch(first, { leadingComment: '/* first literal trivia */', bodyComment: '/* helper trivia */' }),
+      helperCatch(second, { leadingComment: '// second literal trivia', bodyComment: '// helper trivia\n' }),
+    ));
+    const matches = relocateFunctionFragments(previous.fragments, current.fragments);
+    for (const thrown of [first, second]) {
+      const oldHelper = helperForThrow(previous, thrown);
+      const newHelper = helperForThrow(current, thrown);
+      expect(newHelper.id).toBe(oldHelper.id);
+      expect(newHelper.identity.containerSemanticFingerprint).toBe(oldHelper.identity.containerSemanticFingerprint);
+      expect(relocationFor(matches, oldHelper)).toMatchObject({ status: 'matched', currentId: newHelper.id, certainty: 'exact' });
+    }
   });
 
   it('separates lexical nesting while fingerprints deterministically cover finally presence and body', async () => {

@@ -214,15 +214,15 @@ const structuralOrdinal = (node: ts.Node, parent: ts.Node, predicate: (candidate
 const normalizedSyntax = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
 const structuralFingerprint = (node: ts.Node, omitNestedFunctionBodies = false): string => {
-  const value = ts.isIdentifier(node) || ts.isPrivateIdentifier(node) ? node.text
-    : ts.isStringLiteral(node) || ts.isNumericLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text
-      : '';
+  const value = ts.isIdentifier(node) || ts.isPrivateIdentifier(node) || ts.isLiteralExpression(node) || ts.isTemplateLiteralToken(node) || ts.isJsxText(node)
+    ? node.text
+    : undefined;
   const children: string[] = [];
   const omittedBody = omitNestedFunctionBodies && ts.isFunctionLike(node) && 'body' in node ? node.body : undefined;
   ts.forEachChild(node, (child) => {
     children.push(child === omittedBody ? `body:${child.kind}` : structuralFingerprint(child, omitNestedFunctionBodies));
   });
-  return `${node.kind}${value.length > 0 ? `:${normalizedSyntax(value)}` : ''}[${children.join(',')}]`;
+  return `${node.kind}${value === undefined ? '' : `:${value.length}:${value}`}[${children.join(',')}]`;
 };
 
 const nearestCatchClause = (node: ts.Node): ts.CatchClause | undefined => {
