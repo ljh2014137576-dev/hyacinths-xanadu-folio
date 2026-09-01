@@ -1,6 +1,6 @@
 # 需求映射与领域追踪
 
-状态：提议
+状态：MVP 0.1 实现追踪（PR #16）
 
 依据：产品需求文档 v0.1（2026-08-31）、MVP 0.1 Milestone、Issues #1-#14
 
@@ -56,7 +56,7 @@
 | NFR-002 | 新语言不修改核心页面模型 | `model`/`adapter-api` 无具体编译器类型；测试 adapter 运行同一 contract suite | [#1](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/1)、[#2](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/2)、[#5](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/5) |
 | NFR-003 | 每条关系可追溯到规则包、位置和解析结果 | `RelationBridge.evidence`、call-site/target revision、adapter provenance；来源 inspector | [#1](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/1)、[#2](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/2)、[#5](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/5)、[#6](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/6) |
 | NFR-004 | 渐进响应、进度、取消、部分可浏览 | batch commit、task event、cancellation token、partial snapshot；集成测试取消与迟到响应 | [#4](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/4)、[#3](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/3) |
-| NFR-005 | 文件变化只重建受影响关系 | file fingerprint、dependency invalidation、adapter incremental session、stale revision | [#4](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/4)、[#5](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/5) |
+| NFR-005 | 文件变化只重建受影响关系 | 目标架构仍为 file fingerprint、dependency invalidation 与 incremental session；MVP adapter 当前诚实声明 `incrementalUpdate=false`，使用受控全量重建，不把它伪装为增量。后续启用前必须补依赖失效测试 | [#4](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/4)、[#5](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/5) |
 | NFR-006 | 单文件/规则包失败不破坏全部索引 | utility process、文件级事务、last-good snapshot、structured diagnostics、contract failure tests | [#2](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/2)、[#4](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/4)、[#5](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/5) |
 | NFR-007 | 核心操作支持键盘 | command registry、可见 focus、drawer focus trap、桥梁/来源详情的键盘等价操作 | [#7](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/7)、[#10](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/10)、[#11](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/11) |
 | NFR-008 | 颜色不是唯一关系编码 | resolution 对应标签、线型、端点和文本；高对比/无颜色组件测试 | [#6](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/6)、[#7](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/7)、[#9](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/9)、[#11](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/11) |

@@ -1,6 +1,6 @@
 # ADR-0002：LanguageAdapter 合同与插件边界
 
-- 状态：提议
+- 状态：已接受（分析 PR #15）
 - 日期：2026-09-01
 - 关联：[Issue #1](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/1)、[#2](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/2)、[#4](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/4)、[#5](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/5)、[#13](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/13)
 
@@ -177,6 +177,8 @@ type RelocationResult =
 上层显式更新 FlowPage/BusinessNode 引用并保留 migration log；不得仅按行号自动重连。
 
 ## TypeScript adapter 的正式解析策略
+
+MVP 0.1 实现说明：当前内置 adapter 对 `incrementalUpdate` 诚实声明为 `false`。文件变更会启动新的、受授权边界约束的全量 Program；取消由 main 直接终止 utility process，并传播 `cancelled`，partial 结果不写成成功缓存。未来引入持久 incremental builder/language-service session 时必须先把 capability 改为 `true` 并补增量失效测试。
 
 ### 版本
 

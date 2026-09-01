@@ -1,6 +1,6 @@
 # ADR-0001：桌面应用与前端技术栈
 
-- 状态：提议
+- 状态：已接受（分析 PR #15）
 - 日期：2026-09-01
 - 决策者：MVP 0.1 架构评审
 - 关联：[Issue #3](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/3)、[#5](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/5)、[#6](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/6)、[#7](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/7)、[#12](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/12)
@@ -167,7 +167,7 @@ SQLite 适合事务、增量关系查询、schema migration 和可重建缓存/�
 
 ## 验证门槛
 
-ADR 从“提议”转为“接受”前，首个实施 PR 至少证明：
+实施验证继续要求：
 
 - 三入口 build 可重复，renderer bundle 不含 Node/Compiler API。
 - sandbox + context isolation + 窄 IPC 通过安全 smoke。

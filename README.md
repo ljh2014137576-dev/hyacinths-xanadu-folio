@@ -41,7 +41,7 @@ npm run test:e2e
 npm run license:check
 ```
 
-- `npm test` 覆盖领域模型、adapter contract、TypeScript Program/TypeChecker、精确范围、解析状态、outgoing-only、分支、五类循环、递归/调用环、桥梁几何、BusinessNode、持久化和主要组件交互。
+- `npm test` 覆盖领域模型、完整 IPC DTO/路径负例、adapter contract、受控 ParseConfigHost/CompilerHost、TypeScript Program/TypeChecker、精确范围、解析状态、显式逐层 outgoing-only、分支后续/合流、五类循环及归纳证明、递归/调用环、桥梁空闲性能与 probable 状态、BusinessNode FlowPage、generation 持久化和主要组件交互。
 - `npm run test:e2e` 需要先执行 `npm run build`。它启动真实 Electron 应用，走完 fixture 授权、utility 索引、FlowPage、来源往返、分支、循环折叠、BusinessNode、沉浸抽屉和重启恢复。
 - `npm run license:check` 审核 lockfile 中每个包的许可证字段；新许可证必须显式评审后才能进入 allowlist。
 
@@ -59,13 +59,13 @@ npm run start
 建议验收顺序：
 
 1. 选择 `order-service`，确认 TypeScript manifest、Compiler 版本、能力和 degraded/healthy 状态可见；fixture 的故意语法错误会产生可恢复诊断。
-2. 搜索并打开 `createOrder`。标准视图以源码卡为主体，只沿出站调用展开，未加入 `unrelatedInboundCaller`。
+2. 在目录树或统一搜索中打开 `createOrder`。初始 FlowPage 只显示入口和可发现引用；点击“展开”按 RelationId 逐层加入目标，且不会加入 `unrelatedInboundCaller`。
 3. 点击调用范围或桥梁查看 resolved/ambiguous/unresolved/external 状态与 TypeChecker 证据。
 4. 点击函数标题进入原文件精确范围，再返回 FlowPage。
 5. 在“分支查看”选择 A 或 B；另一支变暗、显示隐藏数量，页面明确说明这不是实际运行路径。
 6. 展开/折叠 LoopRegion，检查 for/while/do-while/for-of/for-in、entry/back/exit、break/continue/return/throw 和三类静态次数文案。
-7. 多选 `createOrder`、`validateOrderInput`、`reserveInventory`、`saveOrder`，创建“创建订单” BusinessNode。
-8. 切换沉浸式视图，用 Ctrl+Space 打开覆盖画布的目录抽屉、Esc 关闭、图钉返回标准常驻目录。
+7. 多选 `createOrder`、`validateOrderInput`、`reserveInventory`、`saveOrder`，创建并打开“创建订单” BusinessNode FlowPage，核对节点定义来源和每个成员的文件/range。
+8. 切换沉浸式视图，核对中央组合流程和两侧可折叠原始来源长页；用 Ctrl+Space 打开覆盖画布的目录抽屉、Esc 关闭、图钉返回标准常驻目录。
 9. 关闭并重新启动应用，重新选择同一项目，确认 mode、viewport、分支、循环折叠和 BusinessNode 恢复。
 
 ## 实际运行截图
@@ -94,6 +94,7 @@ npm run start
 ## MVP 范围限制
 
 - 首版只加载随应用发布的 TypeScript adapter；任意第三方规则包安装、签名和权限模型属于后续阶段。
+- 当前 TypeScript adapter 诚实声明 `incrementalUpdate=false`；变更触发受控全量重建。取消会终止 utility process，partial/cancelled 不会保存为成功索引缓存。
 - 持久化采用 `StoragePort` 后的原子 JSON 实现；SQLite driver 仍需单独完成 Electron ABI/打包验证。
 - 静态分析不能声称某次真实运行经过了哪条分支或循环了多少次；真实追踪属于未来运行阶段。
 - 项目自身尚未选择开源许可证。分发源码或安装包前，仓库所有者必须确定项目许可证并完成第三方 notices 审阅。

@@ -1,6 +1,6 @@
 # ADR-0003：流程页与来源桥梁渲染模型
 
-- 状态：提议
+- 状态：已接受（分析 PR #15）
 - 日期：2026-09-01
 - 关联：[Issue #6](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/6)、[#7](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/7)、[#8](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/8)、[#9](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/9)、[#10](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/10)、[#11](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/11)、[#13](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/13)
 
