@@ -271,6 +271,10 @@ const rangeSchema = z.object({
   }
 });
 
+const relativePathSchema = z.string().min(1).refine((value) =>
+  !/^[A-Za-z]:[\\/]/.test(value) && !value.startsWith('/') && !value.startsWith('\\') && !value.split(/[\\/]+/).some((segment) => segment === '..'),
+'Path must stay inside the workspace');
+
 const anchorSchema = z.object({
   sourceFileId: z.string().min(1),
   revision: z.string().min(1),
@@ -326,7 +330,7 @@ export const businessNodeSchema = z.object({
   })).min(1),
   presentation: z.object({ collapsedByDefault: z.boolean() }),
   provenance: z.object({
-    definitionPath: z.string().min(1),
+    definitionPath: relativePathSchema,
     createdBy: z.literal('local-user'),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),

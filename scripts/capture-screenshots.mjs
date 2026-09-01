@@ -19,9 +19,15 @@ try {
   const page = await app.firstWindow();
   await page.getByRole('button', { name: '选择本地 TypeScript 项目' }).click();
   await page.getByText('选择入口函数，创建 FlowPage').waitFor();
-  await page.getByLabel('搜索文件或函数').fill('createOrder');
+  await page.getByLabel('搜索文件、函数、方法或业务节点').fill('createOrder');
   await page.locator('.entry-picker button').filter({ hasText: 'createOrder' }).click();
+  for (const target of ['validateOrderInput', 'getProducts', 'calculateOrderPricing', 'reserveInventory', 'saveOrder', 'followPaidBranch', 'inspectQueues']) {
+    await page.getByRole('button', { name: new RegExp(`展开 ${target}`) }).click();
+  }
+  await page.getByRole('button', { name: /展开 shipOrder/ }).click();
+  await page.getByRole('button', { name: /展开 requestPayment/ }).click();
   await page.locator('.source-card').filter({ has: page.locator('header strong', { hasText: /^createOrder$/ }) }).waitFor();
+  await page.getByLabel('搜索文件、函数、方法或业务节点').fill('');
   await page.screenshot({ path: resolve(outputDirectory, 'standard-view.png'), fullPage: false });
   await page.getByRole('button', { name: '沉浸式' }).click();
   await page.locator('.workspace-shell--immersive').waitFor();

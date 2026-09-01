@@ -1,5 +1,5 @@
 import type { MessageEvent } from 'electron';
-import { indexTypeScriptProject } from '../src/adapter-typescript/index.js';
+import { indexTypeScriptProjectOperation } from '../src/adapter-typescript/index.js';
 import type { IndexProgress } from '../src/adapter-api/index.js';
 
 interface HealthRequest {
@@ -49,8 +49,8 @@ process.parentPort?.on('message', (event: MessageEvent) => {
     const reportProgress = (progress: IndexProgress): void => {
       process.parentPort?.postMessage({ type: 'index-progress', requestId, progress });
     };
-    void indexTypeScriptProject(rootPath, controller.signal, reportProgress)
-      .then((snapshot) => process.parentPort?.postMessage({ type: 'index-result', requestId, snapshot }))
+    void indexTypeScriptProjectOperation(rootPath, controller.signal, reportProgress)
+      .then((result) => process.parentPort?.postMessage({ type: 'index-result', requestId, result }))
       .catch((error: unknown) => process.parentPort?.postMessage({
         type: 'index-error',
         requestId,

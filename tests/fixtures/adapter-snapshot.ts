@@ -31,10 +31,11 @@ const shipId = symbolId('symbol:shipOrder');
 const requestId = symbolId('symbol:requestPayment');
 
 const fragment = (id: typeof createId, name: string): FunctionFragment => {
-  const declarationStart = content.indexOf(name);
+  const signatureStart = content.indexOf(`function ${name}`);
+  const declarationStart = signatureStart + 'function '.length;
   const fullStart = content.lastIndexOf('export function', declarationStart);
-  const next = content.indexOf('\n}\n', declarationStart);
-  const fullEnd = next + 2;
+  const closing = content.indexOf('\n}', declarationStart);
+  const fullEnd = closing + 2;
   return {
     id,
     sourceFileId: fileId,
@@ -79,7 +80,7 @@ export const testSnapshot: AdapterIndexSnapshot = {
     adapterId: 'xanadu.typescript', displayName: 'TypeScript', adapterVersion: '0.1.0', compilerVersion: '6.0.3', coreApiRange: '^1.0.0', dtoSchemaVersion: 1,
     languages: [{ languageId: 'typescript', displayName: 'TypeScript', filePatterns: ['**/*.ts'] }],
     detection: { projectFiles: ['tsconfig.json'], filePatterns: ['**/*.ts'] },
-    capabilities: { symbols: 'semantic', references: 'semantic', controlFlow: true, loops: true, stableIds: 'relocatable', incrementalUpdate: true, externalEndpoints: true },
+    capabilities: { symbols: 'semantic', references: 'semantic', controlFlow: true, loops: true, stableIds: 'relocatable', incrementalUpdate: false, externalEndpoints: true },
     runtime: { kind: 'bundled-node', entrypoint: 'adapter-typescript/index.js' },
   },
   health: { status: 'healthy', checkedAt: '2026-09-01T00:00:00.000Z' },

@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { indexTypeScriptProject } from '../../src/adapter-typescript/index.js';
 import { buildFlowPage } from '../../src/index-core/index.js';
-import { businessNodeId, type UserWorkspaceState } from '../../src/model/index.js';
+import { businessNodeId, flowPageId, type UserWorkspaceState } from '../../src/model/index.js';
 import { JsonStorage } from '../../src/storage/json-storage.js';
 
 const temporaryRoots: string[] = [];
@@ -42,11 +42,26 @@ describe('JsonStorage user assets and rebuildable cache', () => {
       recentFlowPageIds: [page.id],
     };
     const storage = new JsonStorage(root, 'fixture-workspace');
-    await storage.saveUserState(state);
+    await storage.saveUserState(state, 1);
     await storage.saveIndexCache(snapshot);
     expect((await storage.loadIndexCache())?.fragments.length).toBeGreaterThan(0);
     await storage.clearIndexCache();
     expect(await storage.loadIndexCache()).toBeUndefined();
     expect(await storage.loadUserState()).toEqual(state);
+  });
+
+  it('serializes writes and rejects an older generation that arrives later', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'xanadu-storage-order-'));
+    temporaryRoots.push(root);
+    const storage = new JsonStorage(root, 'fixture-workspace');
+    const newer: UserWorkspaceState = { schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [flowPageId('flow:newer')] };
+    const older: UserWorkspaceState = { schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [flowPageId('flow:older')] };
+    const [newerResult, olderResult] = await Promise.all([
+      storage.saveUserState(newer, 20),
+      storage.saveUserState(older, 10),
+    ]);
+    expect(newerResult.status).toBe('saved');
+    expect(olderResult.status).toBe('stale');
+    expect((await storage.loadUserState()).recentFlowPageIds).toEqual([flowPageId('flow:newer')]);
   });
 });

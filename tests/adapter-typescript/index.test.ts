@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { indexTypeScriptProject } from '../../src/adapter-typescript/index.js';
+import { indexTypeScriptProject, indexTypeScriptProjectOperation } from '../../src/adapter-typescript/index.js';
 import type { AdapterIndexSnapshot } from '../../src/adapter-api/index.js';
 
 const fixtureRoot = resolve('fixtures/order-service');
@@ -16,6 +16,21 @@ describe('TypeScript 6 LanguageAdapter', () => {
     expect(snapshot.detection.status).toBe('matched');
     expect(snapshot.manifest.compilerVersion).toMatch(/^6\.0\./);
     expect(snapshot.manifest.capabilities.references).toBe('semantic');
+    expect(snapshot.manifest.capabilities.incrementalUpdate).toBe(false);
+  });
+
+  it('propagates partial and cancelled terminal states instead of claiming completion', async () => {
+    const partial = await indexTypeScriptProjectOperation(fixtureRoot);
+    expect(partial.status).toBe('partial');
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await indexTypeScriptProjectOperation(fixtureRoot, controller.signal);
+    expect(cancelled.status).toBe('cancelled');
+    const midFlightController = new AbortController();
+    const midFlight = await indexTypeScriptProjectOperation(fixtureRoot, midFlightController.signal, () => midFlightController.abort());
+    expect(midFlight.status).toBe('cancelled');
+    const changed = await indexTypeScriptProjectOperation(fixtureRoot, new AbortController().signal, () => undefined, ['src/controllers/order.controller.ts']);
+    expect(changed.status === 'partial' && changed.snapshot.diagnostics.some((diagnostic) => diagnostic.code === 'INCREMENTAL_UNAVAILABLE')).toBe(true);
   });
 
   it('extracts functions, methods and exact UTF-16 source ranges', () => {
@@ -76,5 +91,25 @@ describe('TypeScript 6 LanguageAdapter', () => {
     expect(exitReasons).toContain('throw');
     expect(snapshot.loops.some((loop) => loop.continueEdges.length > 0)).toBe(true);
     expect(snapshot.loops.every((loop) => loop.backEdges.length === 1)).toBe(true);
+  });
+
+  it('anchors loop control by loop kind and only proves validated induction updates', () => {
+    const textFor = (anchor: { readonly sourceFileId: string; readonly range: { readonly start: number; readonly end: number } }): string =>
+      snapshot.sourceContents[anchor.sourceFileId]?.slice(anchor.range.start, anchor.range.end) ?? '';
+    const loopByText = (needle: string) => snapshot.loops.find((loop) => textFor(loop.source).includes(needle));
+
+    const stepTwo = loopByText('index += 2');
+    expect(stepTwo?.iterationEstimate).toMatchObject({ kind: 'upper-bound', value: 3 });
+    expect(textFor(stepTwo?.backEdges[0]?.target ?? (() => { throw new Error('step-two back edge missing'); })())).toBe('index += 2');
+    expect(stepTwo?.continueEdges.length).toBeGreaterThan(0);
+    expect(stepTwo?.exitEdges.some((edge) => edge.reason === 'break')).toBe(true);
+    expect(textFor(stepTwo?.continueEdges[0]?.target ?? (() => { throw new Error('labeled continue missing'); })())).toBe('index += 2');
+
+    expect(loopByText('down--')?.iterationEstimate).toMatchObject({ kind: 'upper-bound', value: 5 });
+    expect(loopByText('wrong++')?.iterationEstimate.kind).toBe('unknown');
+    expect(loopByText('stuck < 5')?.iterationEstimate.kind).toBe('unknown');
+
+    const doWhile = snapshot.loops.find((loop) => loop.kind === 'do-while');
+    expect(doWhile?.entryEdges[0]?.target.range).toEqual(doWhile?.body.range);
   });
 });

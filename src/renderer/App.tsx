@@ -10,6 +10,7 @@ export function App(): React.JSX.Element {
   const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
   const [snapshot, setSnapshot] = useState<AdapterIndexSnapshot | null>(null);
   const [userState, setUserState] = useState<UserWorkspaceState | null>(null);
+  const [indexStatus, setIndexStatus] = useState<'completed' | 'partial'>('completed');
   const [progress, setProgress] = useState<IndexProgress | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,13 +38,25 @@ export function App(): React.JSX.Element {
       setWorkspace(selected);
       const nextRequestId = `index-${Date.now()}`;
       requestId.current = nextRequestId;
-      const [indexed, restored] = await Promise.all([
+      const [indexResult, restored] = await Promise.all([
         window.xanadu.indexWorkspace({ handle: selected.handle, requestId: nextRequestId }),
         window.xanadu.loadUserState({ handle: selected.handle }),
       ]);
-      setSnapshot(indexed);
+      if (indexResult.status === 'cancelled') {
+        setProgress({ phase: 'read', completed: 0, message: '索引已取消' });
+        setWorkspace(null);
+        return;
+      }
+      if (indexResult.status === 'failed') throw new Error(indexResult.message);
+      setSnapshot(indexResult.snapshot);
+      setIndexStatus(indexResult.status);
       setUserState(restored);
-      setProgress({ phase: 'persist', completed: indexed.sourceFiles.length, total: indexed.sourceFiles.length, message: '索引完成' });
+      setProgress({
+        phase: 'persist',
+        completed: indexResult.snapshot.sourceFiles.length,
+        total: indexResult.snapshot.sourceFiles.length,
+        message: indexResult.status === 'partial' ? '部分索引完成，请查看诊断' : '索引完成',
+      });
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : '项目索引失败，请检查 TypeScript 配置。');
     } finally {
@@ -61,12 +74,14 @@ export function App(): React.JSX.Element {
         workspace={workspace}
         snapshot={snapshot}
         initialState={userState}
-        onPersist={(state) => window.xanadu.saveUserState({ handle: workspace.handle, state })}
+        indexStatus={indexStatus}
+        onPersist={(state, generation) => window.xanadu.saveUserState({ handle: workspace.handle, generation, state })}
         onChooseAnother={() => {
           setWorkspace(null);
           setSnapshot(null);
           setUserState(null);
           setProgress(null);
+          setIndexStatus('completed');
         }}
       />
     );

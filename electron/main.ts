@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   app,
@@ -15,26 +15,34 @@ import {
   cancelIndexRequestSchema,
   indexProgressEnvelopeSchema,
   indexWorkspaceRequestSchema,
+  indexWorkspaceResultSchema,
   isEmptyRequest,
   saveUserStateRequestSchema,
   workspaceHandleRequestSchema,
   workspaceSummarySchema,
   type AppInfo,
+  type IndexWorkspaceResult,
   type UtilityHealth,
   type WorkspaceSummary,
 } from '../src/ipc/contracts.js';
-import type { AdapterIndexSnapshot, IndexProgress } from '../src/adapter-api/index.js';
+import type { IndexProgress } from '../src/adapter-api/index.js';
 import { parseUserWorkspaceState } from '../src/model/index.js';
 import { JsonStorage } from '../src/storage/json-storage.js';
+import { isTrustedSenderUrl } from '../src/ipc/security.js';
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 interface WorkspaceRecord {
   readonly rootPath: string;
-  readonly storageIdentity: string;
+  readonly storage: JsonStorage;
+}
+
+interface ActiveIndex {
+  readonly child: UtilityProcess;
+  cancel(): void;
 }
 
 const workspaceRoots = new Map<string, WorkspaceRecord>();
-const activeIndexes = new Map<string, UtilityProcess>();
+const activeIndexes = new Map<string, ActiveIndex>();
 
 const configuredUserData = process.env.XANADU_USER_DATA;
 if (configuredUserData !== undefined) {
@@ -44,14 +52,11 @@ if (configuredUserData !== undefined) {
 const senderIsTrusted = (event: IpcMainInvokeEvent): boolean => {
   const senderUrl = event.senderFrame?.url ?? '';
   const developmentUrl = process.env.VITE_DEV_SERVER_URL;
-  if (developmentUrl !== undefined) {
-    try {
-      return new URL(senderUrl).origin === new URL(developmentUrl).origin;
-    } catch {
-      return false;
-    }
-  }
-  return senderUrl === pathToFileURL(join(currentDirectory, '../../dist/index.html')).href;
+  return isTrustedSenderUrl(
+    senderUrl,
+    developmentUrl,
+    pathToFileURL(join(currentDirectory, '../../dist/index.html')).href,
+  );
 };
 
 const assertTrustedEmptyRequest = (event: IpcMainInvokeEvent, request: unknown): void => {
@@ -68,7 +73,10 @@ const registerWorkspace = (rootPath: string): WorkspaceSummary => {
   const handle = randomUUID();
   workspaceRoots.set(handle, {
     rootPath,
-    storageIdentity: createHash('sha256').update(resolve(rootPath).toLocaleLowerCase()).digest('hex'),
+    storage: new JsonStorage(
+      join(app.getPath('userData'), 'xanadu-data'),
+      createHash('sha256').update(resolve(rootPath).toLocaleLowerCase()).digest('hex'),
+    ),
   });
   return workspaceSummarySchema.parse({ handle, displayName: rootPath.split(/[\\/]/).at(-1) ?? 'workspace' });
 };
@@ -77,38 +85,6 @@ const getWorkspace = (handle: string): WorkspaceRecord => {
   const record = workspaceRoots.get(handle);
   if (record === undefined) throw new Error('Workspace handle is invalid or expired');
   return record;
-};
-
-const storageFor = (record: WorkspaceRecord): JsonStorage =>
-  new JsonStorage(join(app.getPath('userData'), 'xanadu-data'), record.storageIdentity);
-
-const isSafeRelativePath = (value: string): boolean =>
-  !isAbsolute(value) && value !== '..' && !value.startsWith('../') && !value.includes('/../');
-
-const validateIndexSnapshot = (value: unknown): AdapterIndexSnapshot => {
-  if (
-    typeof value !== 'object' || value === null ||
-    !('manifest' in value) || typeof value.manifest !== 'object' || value.manifest === null ||
-    !('sourceFiles' in value) || !Array.isArray(value.sourceFiles) ||
-    !('sourceContents' in value) || typeof value.sourceContents !== 'object' || value.sourceContents === null ||
-    !('fragments' in value) || !Array.isArray(value.fragments) ||
-    !('relations' in value) || !Array.isArray(value.relations) ||
-    !('loops' in value) || !Array.isArray(value.loops) ||
-    !('diagnostics' in value) || !Array.isArray(value.diagnostics)
-  ) {
-    throw new Error('Indexer utility returned an invalid snapshot');
-  }
-  const sourceFiles: unknown[] = value.sourceFiles;
-  for (const file of sourceFiles) {
-    if (
-      typeof file !== 'object' || file === null ||
-      !('projectRelativePath' in file) || typeof file.projectRelativePath !== 'string' ||
-      !isSafeRelativePath(file.projectRelativePath)
-    ) {
-      throw new Error('Indexer snapshot contains an unsafe source path');
-    }
-  }
-  return value as AdapterIndexSnapshot;
 };
 
 const runUtilityHealth = (): Promise<UtilityHealth> =>
@@ -140,17 +116,26 @@ const runUtilityIndex = (
   rootPath: string,
   requestId: string,
   onProgress: (progress: IndexProgress) => void,
-): Promise<AdapterIndexSnapshot> => new Promise((resolvePromise, reject) => {
+): Promise<IndexWorkspaceResult> => new Promise((resolvePromise, reject) => {
   const child: UtilityProcess = utilityProcess.fork(join(currentDirectory, 'utility.js'));
-  activeIndexes.set(requestId, child);
+  let settled = false;
   const finish = (): void => {
     activeIndexes.delete(requestId);
     child.kill();
   };
+  const cancel = (): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    finish();
+    resolvePromise({ status: 'cancelled' });
+  };
   const timer = setTimeout(() => {
+    settled = true;
     finish();
     reject(new Error('Indexer utility timed out'));
   }, 60_000);
+  activeIndexes.set(requestId, { child, cancel });
 
   child.on('message', (message: unknown) => {
     if (typeof message !== 'object' || message === null || !('type' in message) || !('requestId' in message) || message.requestId !== requestId) return;
@@ -159,20 +144,23 @@ const runUtilityIndex = (
       if (parsed.success) onProgress(parsed.data.progress);
       return;
     }
-    if (message.type === 'index-result' && 'snapshot' in message) {
+    if (message.type === 'index-result' && 'result' in message) {
       clearTimeout(timer);
       try {
-        const snapshot = validateIndexSnapshot(message.snapshot);
+        const result = indexWorkspaceResultSchema.parse(message.result) as unknown as IndexWorkspaceResult;
+        settled = true;
         finish();
-        resolvePromise(snapshot);
+        resolvePromise(result);
       } catch (error: unknown) {
+        settled = true;
         finish();
-        reject(error instanceof Error ? error : new Error('Indexer snapshot validation failed'));
+        reject(error instanceof Error ? error : new Error('Indexer result validation failed'));
       }
       return;
     }
     if (message.type === 'index-error') {
       clearTimeout(timer);
+      settled = true;
       finish();
       reject(new Error('message' in message && typeof message.message === 'string' ? message.message : 'Indexer utility failed'));
     }
@@ -211,37 +199,37 @@ const installIpcHandlers = (): void => {
     assertTrustedRequest(event);
     const parsed = indexWorkspaceRequestSchema.parse(request);
     const workspace = getWorkspace(parsed.handle);
-    const snapshot = await runUtilityIndex(workspace.rootPath, parsed.requestId, (progress) => {
+    const result = await runUtilityIndex(workspace.rootPath, parsed.requestId, (progress) => {
       event.sender.send(IPC_CHANNELS.indexProgress, { requestId: parsed.requestId, progress });
     });
-    await storageFor(workspace).saveIndexCache(snapshot);
-    return snapshot;
+    if (result.status === 'completed') await workspace.storage.saveIndexCache(result.snapshot);
+    return result;
   });
 
   ipcMain.handle(IPC_CHANNELS.cancelIndex, (event, request: unknown): boolean => {
     assertTrustedRequest(event);
     const parsed = cancelIndexRequestSchema.parse(request);
-    const child = activeIndexes.get(parsed.requestId);
-    child?.postMessage({ type: 'cancel', requestId: parsed.requestId });
-    return child !== undefined;
+    const active = activeIndexes.get(parsed.requestId);
+    active?.cancel();
+    return active !== undefined;
   });
 
   ipcMain.handle(IPC_CHANNELS.loadUserState, async (event, request: unknown) => {
     assertTrustedRequest(event);
     const parsed = workspaceHandleRequestSchema.parse(request);
-    return storageFor(getWorkspace(parsed.handle)).loadUserState();
+    return getWorkspace(parsed.handle).storage.loadUserState();
   });
 
   ipcMain.handle(IPC_CHANNELS.saveUserState, async (event, request: unknown) => {
     assertTrustedRequest(event);
     const parsed = saveUserStateRequestSchema.parse(request);
-    await storageFor(getWorkspace(parsed.handle)).saveUserState(parseUserWorkspaceState(parsed.state));
+    return getWorkspace(parsed.handle).storage.saveUserState(parseUserWorkspaceState(parsed.state), parsed.generation);
   });
 
   ipcMain.handle(IPC_CHANNELS.clearIndexCache, async (event, request: unknown) => {
     assertTrustedRequest(event);
     const parsed = workspaceHandleRequestSchema.parse(request);
-    await storageFor(getWorkspace(parsed.handle)).clearIndexCache();
+    await getWorkspace(parsed.handle).storage.clearIndexCache();
   });
 };
 

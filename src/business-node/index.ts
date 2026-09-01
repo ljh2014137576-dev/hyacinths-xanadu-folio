@@ -11,6 +11,7 @@ export interface CreateBusinessNodeInput {
   readonly name: string;
   readonly description?: string;
   readonly memberIds: readonly SymbolId[];
+  readonly availableFragmentIds: ReadonlySet<SymbolId>;
   readonly now: string;
 }
 
@@ -19,6 +20,9 @@ export const createBusinessNode = (input: CreateBusinessNodeInput): BusinessNode
   if (name.length === 0) throw new Error('BusinessNode name is required');
   if (input.memberIds.length === 0) throw new Error('BusinessNode requires at least one function');
   const uniqueMembers = [...new Set(input.memberIds)];
+  if (uniqueMembers.some((memberId) => !input.availableFragmentIds.has(memberId))) {
+    throw new Error('BusinessNode nesting or unknown members are not allowed');
+  }
   return {
     id: businessNodeId(input.id),
     projectId: input.projectId,

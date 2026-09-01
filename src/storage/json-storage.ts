@@ -28,6 +28,9 @@ const atomicWriteJson = async (filePath: string, value: unknown): Promise<void> 
 
 export class JsonStorage {
   private readonly key: string;
+  private saveQueue: Promise<void> = Promise.resolve();
+  private lastGeneration = -1;
+  private generationLoaded = false;
 
   constructor(private readonly rootPath: string, workspaceIdentity: string) {
     this.key = safeWorkspaceKey(workspaceIdentity);
@@ -43,11 +46,35 @@ export class JsonStorage {
 
   async loadUserState(): Promise<UserWorkspaceState> {
     const value = await readJson(this.assetPath);
-    return value === undefined ? createEmptyUserWorkspaceState() : parseUserWorkspaceState(value);
+    if (value === undefined) {
+      this.generationLoaded = true;
+      return createEmptyUserWorkspaceState();
+    }
+    if (
+      typeof value === 'object' && value !== null &&
+      'storageVersion' in value && value.storageVersion === 1 &&
+      'generation' in value && typeof value.generation === 'number' &&
+      'state' in value
+    ) {
+      this.lastGeneration = value.generation;
+      this.generationLoaded = true;
+      return parseUserWorkspaceState(value.state);
+    }
+    this.generationLoaded = true;
+    return parseUserWorkspaceState(value);
   }
 
-  saveUserState(state: UserWorkspaceState): Promise<void> {
-    return atomicWriteJson(this.assetPath, parseUserWorkspaceState(state));
+  saveUserState(state: UserWorkspaceState, generation: number): Promise<{ readonly status: 'saved' | 'stale'; readonly generation: number }> {
+    const parsedState = parseUserWorkspaceState(state);
+    const operation = this.saveQueue.then(async () => {
+      if (!this.generationLoaded) await this.loadUserState();
+      if (generation <= this.lastGeneration) return { status: 'stale' as const, generation };
+      await atomicWriteJson(this.assetPath, { storageVersion: 1, generation, state: parsedState });
+      this.lastGeneration = generation;
+      return { status: 'saved' as const, generation };
+    });
+    this.saveQueue = operation.then(() => undefined, () => undefined);
+    return operation;
   }
 
   async loadIndexCache(): Promise<AdapterIndexSnapshot | undefined> {

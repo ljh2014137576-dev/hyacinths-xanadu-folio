@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   indexProgressEnvelopeSchema,
+  indexWorkspaceResultSchema,
+  saveUserStateResultSchema,
   type IndexProgressListener,
   type XanaduDesktopApi,
 } from '../src/ipc/contracts.js';
@@ -9,7 +11,8 @@ const api: XanaduDesktopApi = Object.freeze({
   getAppInfo: () => ipcRenderer.invoke('xanadu:app-info') as ReturnType<XanaduDesktopApi['getAppInfo']>,
   selectWorkspace: () => ipcRenderer.invoke('xanadu:select-workspace') as ReturnType<XanaduDesktopApi['selectWorkspace']>,
   getUtilityHealth: () => ipcRenderer.invoke('xanadu:utility-health') as ReturnType<XanaduDesktopApi['getUtilityHealth']>,
-  indexWorkspace: (request: Parameters<XanaduDesktopApi['indexWorkspace']>[0]) => ipcRenderer.invoke('xanadu:index-workspace', request) as ReturnType<XanaduDesktopApi['indexWorkspace']>,
+  indexWorkspace: async (request: Parameters<XanaduDesktopApi['indexWorkspace']>[0]) =>
+    indexWorkspaceResultSchema.parse(await ipcRenderer.invoke('xanadu:index-workspace', request)) as unknown as Awaited<ReturnType<XanaduDesktopApi['indexWorkspace']>>,
   cancelIndex: (request: Parameters<XanaduDesktopApi['cancelIndex']>[0]) => ipcRenderer.invoke('xanadu:cancel-index', request) as ReturnType<XanaduDesktopApi['cancelIndex']>,
   onIndexProgress: (listener: IndexProgressListener) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown): void => {
@@ -20,7 +23,8 @@ const api: XanaduDesktopApi = Object.freeze({
     return () => ipcRenderer.removeListener('xanadu:index-progress', handler);
   },
   loadUserState: (request: Parameters<XanaduDesktopApi['loadUserState']>[0]) => ipcRenderer.invoke('xanadu:load-user-state', request) as ReturnType<XanaduDesktopApi['loadUserState']>,
-  saveUserState: (request: Parameters<XanaduDesktopApi['saveUserState']>[0]) => ipcRenderer.invoke('xanadu:save-user-state', request) as ReturnType<XanaduDesktopApi['saveUserState']>,
+  saveUserState: async (request: Parameters<XanaduDesktopApi['saveUserState']>[0]) =>
+    saveUserStateResultSchema.parse(await ipcRenderer.invoke('xanadu:save-user-state', request)),
   clearIndexCache: (request: Parameters<XanaduDesktopApi['clearIndexCache']>[0]) => ipcRenderer.invoke('xanadu:clear-index-cache', request) as ReturnType<XanaduDesktopApi['clearIndexCache']>,
 });
 

@@ -1,16 +1,19 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AdapterIndexSnapshot } from '../../adapter-api/index.js';
 import { measureBridge, type BridgeGeometry, type RectLike } from '../../bridge-renderer/geometry.js';
-import { formatIterationEstimate, type FlowPage, type FunctionFragment, type RelationBridge } from '../../model/index.js';
+import { formatIterationEstimate, type BusinessNode, type FlowPage, type FunctionFragment, type RelationBridge } from '../../model/index.js';
 
 interface FlowCanvasProps {
   readonly snapshot: AdapterIndexSnapshot;
+  readonly businessNodes: readonly BusinessNode[];
   readonly page: FlowPage;
   readonly relationStates: Readonly<Record<string, 'visible' | 'dimmed' | 'collapsed'>>;
   readonly selectedRelationId?: string;
   readonly onSelectRelation: (relationId: string) => void;
+  readonly onToggleRelation: (relationId: string) => void;
   readonly onOpenSource: (fragmentId: string) => void;
   readonly onToggleLoop: (loopId: string) => void;
+  readonly onToggleBusinessPlacement: (placementId: string) => void;
   readonly onViewportChange: (x: number, y: number) => void;
 }
 
@@ -20,6 +23,7 @@ interface Decoration {
   readonly kind: 'definition' | 'call';
   readonly id: string;
   readonly status?: RelationBridge['resolution']['status'];
+  readonly certainty?: 'exact' | 'probable';
 }
 
 interface BridgePath extends BridgeGeometry {
@@ -56,6 +60,7 @@ function DecoratedSource({
       kind: 'call' as const,
       id: relation.id,
       status: relation.resolution.status,
+      ...(relation.resolution.status === 'resolved' ? { certainty: relation.resolution.certainty } : {}),
     })),
   ].filter((item) => item.start >= fragment.fullRange.start && item.end <= fragment.fullRange.end)
     .sort((left, right) => left.start - right.start || left.end - right.end);
@@ -71,7 +76,7 @@ function DecoratedSource({
     } else {
       nodes.push(
         <span
-          className={`source-anchor source-anchor--call source-anchor--${decoration.status ?? 'unresolved'}`}
+          className={`source-anchor source-anchor--call source-anchor--${decoration.status ?? 'unresolved'}${decoration.certainty === 'probable' ? ' source-anchor--probable' : ''}`}
           data-call-id={decoration.id}
           key={`call:${decoration.id}`}
           role="button"
@@ -95,7 +100,7 @@ const relationLabel = (relation: RelationBridge, snapshot: AdapterIndexSnapshot)
   const resolution = relation.resolution;
   switch (resolution.status) {
     case 'resolved':
-      return snapshot.fragments.find((fragment) => fragment.id === resolution.targetId)?.displayName ?? '已解析目标';
+      return `${resolution.certainty === 'probable' ? '可能目标 · ' : ''}${snapshot.fragments.find((fragment) => fragment.id === resolution.targetId)?.displayName ?? '已解析目标'}`;
     case 'ambiguous':
       return `${resolution.candidates.length} 个可能目标`;
     case 'unresolved':
@@ -111,20 +116,26 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const [paths, setPaths] = useState<readonly BridgePath[]>([]);
-  const placementFragments = useMemo(() => new Map(props.page.placements
+  const animationFrame = useRef<number | null>(null);
+  const layoutGeneration = useRef(0);
+  const businessCollapsed = props.page.placements.find((placement) => placement.kind === 'business-node')?.collapsed ?? false;
+  const displayPlacements = useMemo(() => props.page.placements.filter((placement) => !businessCollapsed || placement.kind === 'business-node'), [businessCollapsed, props.page.placements]);
+  const placementFragments = useMemo(() => new Map(displayPlacements
     .filter((placement) => placement.kind !== 'business-node')
-    .map((placement) => [placement.id, props.snapshot.fragments.find((fragment) => fragment.id === placement.targetId)])), [props.page.placements, props.snapshot.fragments]);
-  const maxDepth = Math.max(0, ...props.page.placements.map((placement) => placement.depth));
-  const visibleRelations = props.snapshot.relations.filter((relation) => props.page.expandedRelations.includes(relation.id));
+    .map((placement) => [placement.id, props.snapshot.fragments.find((fragment) => fragment.id === placement.targetId)])), [displayPlacements, props.snapshot.fragments]);
+  const maxDepth = Math.max(0, ...displayPlacements.map((placement) => placement.depth));
+  const placedFunctions = useMemo(() => new Set(displayPlacements.filter((placement) => placement.kind === 'function').map((placement) => placement.targetId)), [displayPlacements]);
+  const visibleRelations = useMemo(() => props.snapshot.relations.filter((relation) => placedFunctions.has(relation.sourceFragmentId)), [placedFunctions, props.snapshot.relations]);
+  const expandedRelations = useMemo(() => visibleRelations.filter((relation) => props.page.expandedRelations.includes(relation.id)), [props.page.expandedRelations, visibleRelations]);
 
-  const measure = (): void => {
+  const measure = useCallback((): void => {
     const world = worldRef.current;
     if (world === null) return;
     const worldRect = world.getBoundingClientRect();
     const calls = new Map([...world.querySelectorAll<HTMLElement>('[data-call-id]')].map((element) => [element.dataset.callId ?? '', element]));
     const definitions = new Map([...world.querySelectorAll<HTMLElement>('[data-definition-id]')].map((element) => [element.dataset.definitionId ?? '', element]));
     const next: BridgePath[] = [];
-    for (const relation of visibleRelations) {
+    for (const relation of expandedRelations) {
       if (relation.resolution.status !== 'resolved') continue;
       const source = calls.get(relation.id);
       const target = definitions.get(relation.resolution.targetId);
@@ -136,23 +147,40 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
       );
       next.push({ ...geometry, relation });
     }
-    setPaths(next);
-  };
+    layoutGeneration.current += 1;
+    setPaths((previous) => {
+      const unchanged = previous.length === next.length && previous.every((path, index) => {
+        const candidate = next[index];
+        return candidate !== undefined && path.relation.id === candidate.relation.id && path.path === candidate.path;
+      });
+      return unchanged ? previous : next;
+    });
+  }, [expandedRelations, props.page.viewport.zoom]);
+
+  const scheduleMeasure = useCallback((): void => {
+    if (animationFrame.current !== null) return;
+    animationFrame.current = requestAnimationFrame(() => {
+      animationFrame.current = null;
+      measure();
+    });
+  }, [measure]);
 
   useLayoutEffect(() => {
-    measure();
-  }, [props.page.mode, props.page.placements, props.page.viewport.zoom, props.page.branchFilter, props.snapshot.relations]);
+    scheduleMeasure();
+  }, [props.page.mode, props.page.placements, props.page.viewport.zoom, props.page.branchFilter, scheduleMeasure]);
 
   useEffect(() => {
     const world = worldRef.current;
-    const observer = world !== null && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    const observer = world !== null && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleMeasure) : null;
     if (world !== null) observer?.observe(world);
-    window.addEventListener('resize', measure);
+    window.addEventListener('resize', scheduleMeasure);
     return () => {
       observer?.disconnect();
-      window.removeEventListener('resize', measure);
+      window.removeEventListener('resize', scheduleMeasure);
+      if (animationFrame.current !== null) cancelAnimationFrame(animationFrame.current);
+      animationFrame.current = null;
     };
-  });
+  }, [scheduleMeasure]);
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
@@ -162,7 +190,7 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
     }
   }, [props.page.id, props.page.mode]);
 
-  const columns = Array.from({ length: maxDepth + 1 }, (_, depth) => props.page.placements.filter((placement) => placement.depth === depth));
+  const columns = Array.from({ length: maxDepth + 1 }, (_, depth) => displayPlacements.filter((placement) => placement.depth === depth));
 
   return (
     <div
@@ -170,13 +198,14 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
       ref={scrollRef}
       onScroll={(event) => {
         props.onViewportChange(event.currentTarget.scrollLeft, event.currentTarget.scrollTop);
-        measure();
+        scheduleMeasure();
       }}
       data-testid="flow-scroller"
     >
       <div
         className="flow-world"
         ref={worldRef}
+        onScrollCapture={scheduleMeasure}
         style={{
           width: `${Math.max(1, columns.length) * 520}px`,
           transform: `scale(${props.page.viewport.zoom})`,
@@ -191,10 +220,16 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
             const selected = props.selectedRelationId === bridge.relation.id;
             return (
               <g
-                className={`bridge bridge--${bridge.relation.resolution.status} bridge--${state}${selected ? ' bridge--selected' : ''}`}
+                className={`bridge bridge--${bridge.relation.resolution.status}${bridge.relation.resolution.status === 'resolved' && bridge.relation.resolution.certainty === 'probable' ? ' bridge--probable' : ''} bridge--${state}${selected ? ' bridge--selected' : ''}`}
                 data-relation-id={bridge.relation.id}
                 key={bridge.relation.id}
                 onClick={() => props.onSelectRelation(bridge.relation.id)}
+                role="button"
+                tabIndex={0}
+                aria-label={`${relationLabel(bridge.relation, props.snapshot)} · ${bridge.relation.resolution.status === 'resolved' ? bridge.relation.resolution.certainty : bridge.relation.resolution.status}`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') props.onSelectRelation(bridge.relation.id);
+                }}
               >
                 <path className="bridge-hit" d={bridge.path} />
                 <path className="bridge-stroke" d={bridge.path} markerEnd="url(#arrow-resolved)" />
@@ -207,6 +242,16 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
             <div className="flow-column" data-depth={depth} key={depth}>
               <div className="depth-label">OUTGOING · {depth === 0 ? 'ENTRY' : `DEPTH ${depth}`}</div>
               {placements.map((placement) => {
+                if (placement.kind === 'business-node') {
+                  const node = props.businessNodes.find((item) => item.id === placement.targetId);
+                  if (node === undefined) return null;
+                  return (
+                    <article className="source-card business-flow-card" data-business-node-id={node.id} key={placement.id}>
+                      <header><button type="button" onClick={() => props.onToggleBusinessPlacement(placement.id)}><strong>◇ {node.name}</strong><span>{node.provenance.definitionPath}</span></button><small>{placement.collapsed ? 'EXPAND' : 'COLLAPSE'}</small></header>
+                      {!placement.collapsed && <div className="business-flow-members"><p>{node.description}</p><dl><div><dt>定义来源</dt><dd>{node.provenance.definitionPath}</dd></div><div><dt>创建者</dt><dd>{node.provenance.createdBy}</dd></div><div><dt>更新时间</dt><dd>{node.provenance.updatedAt}</dd></div></dl>{node.members.slice().sort((left, right) => left.order - right.order).map((member) => { const fragment = props.snapshot.fragments.find((item) => item.id === member.fragmentId); return fragment === undefined ? null : <div key={member.fragmentId}><strong>{member.order + 1}. {fragment.displayName}</strong><span>{fragment.provenance.projectRelativePath}</span><code>[{fragment.fullRange.start}, {fragment.fullRange.end})</code></div>; })}</div>}
+                    </article>
+                  );
+                }
                 const fragment = placementFragments.get(placement.id);
                 if (fragment === undefined) return null;
                 if (placement.kind === 'cycle') {
@@ -216,7 +261,12 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
                 const source = props.snapshot.sourceContents[fragment.sourceFileId] ?? '';
                 const outgoing = visibleRelations.filter((relation) => relation.sourceFragmentId === fragment.id);
                 const loops = props.snapshot.loops.filter((loop) => loop.ownerFragmentId === fragment.id);
-                const viaState = placement.viaRelationId === undefined ? 'visible' : props.relationStates[placement.viaRelationId] ?? 'visible';
+                const incomingStates = visibleRelations.flatMap((relation) => relation.resolution.status === 'resolved' && relation.resolution.targetId === fragment.id
+                  ? [props.relationStates[relation.id] ?? 'visible']
+                  : []);
+                const viaState = incomingStates.includes('visible')
+                  ? 'visible'
+                  : placement.viaRelationId === undefined ? 'visible' : props.relationStates[placement.viaRelationId] ?? 'visible';
                 return (
                   <article className={`source-card source-card--${viaState}`} data-fragment-id={fragment.id} key={placement.id}>
                     <header>
@@ -226,12 +276,32 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
                       </button>
                       <small>UTF-16 [{fragment.fullRange.start}, {fragment.fullRange.end})</small>
                     </header>
-                    <DecoratedSource fragment={fragment} source={source} relations={outgoing} onSelectRelation={props.onSelectRelation} />
-                    {outgoing.some((relation) => relation.resolution.status !== 'resolved') && (
+                    <DecoratedSource
+                      fragment={fragment}
+                      source={source}
+                      relations={outgoing}
+                      onSelectRelation={(relationId) => {
+                        props.onSelectRelation(relationId);
+                        const relation = outgoing.find((item) => item.id === relationId);
+                        if (relation?.resolution.status === 'resolved') props.onToggleRelation(relationId);
+                      }}
+                    />
+                    {outgoing.length > 0 && (
                       <div className="relation-stubs">
-                        {outgoing.filter((relation) => relation.resolution.status !== 'resolved').map((relation) => (
-                          <button type="button" className={`relation-stub relation-stub--${relation.resolution.status}`} key={relation.id} onClick={() => props.onSelectRelation(relation.id)}>
-                            {relation.resolution.status === 'ambiguous' ? '◇' : relation.resolution.status === 'external' ? '↗' : '○'} {relationLabel(relation, props.snapshot)}
+                        {outgoing.map((relation) => (
+                          <button
+                            type="button"
+                            className={`relation-stub relation-stub--${relation.resolution.status}`}
+                            key={relation.id}
+                            onClick={() => {
+                              props.onSelectRelation(relation.id);
+                              if (relation.resolution.status === 'resolved') props.onToggleRelation(relation.id);
+                            }}
+                          >
+                            {relation.resolution.status === 'resolved'
+                              ? props.page.expandedRelations.includes(relation.id) ? '− 收起' : '+ 展开'
+                              : relation.resolution.status === 'ambiguous' ? '◇' : relation.resolution.status === 'external' ? '↗' : '○'}{' '}
+                            {relationLabel(relation, props.snapshot)}
                           </button>
                         ))}
                       </div>

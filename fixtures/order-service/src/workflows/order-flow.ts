@@ -49,3 +49,19 @@ export function cycleA(value: number): number {
 export function cycleB(value: number): number {
   return value <= 0 ? 0 : cycleA(value - 1);
 }
+
+export function verifyLoopProofs(): number {
+  let total = 0;
+  stepTwo: for (let index = 0; index < 5; index += 2) {
+    for (const item of [1, 2]) {
+      if (item === 1) continue stepTwo;
+      break stepTwo;
+    }
+    total += index;
+  }
+  for (let down = 5; down > 0; down--) total += down;
+  let wrong = 0;
+  for (let index = 0; index < 5; wrong++) total += index;
+  for (let stuck = 0; stuck < 5;) total += stuck;
+  return total;
+}

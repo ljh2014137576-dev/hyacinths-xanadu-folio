@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { AdapterIndexSnapshot, IndexProgress } from '../adapter-api/index.js';
 import { userWorkspaceStateSchema, type UserWorkspaceState } from '../model/index.js';
+import { adapterIndexSnapshotSchema } from './adapter-schemas.js';
 
 export const IPC_CHANNELS = {
   appInfo: 'xanadu:app-info',
@@ -35,7 +36,10 @@ export interface UtilityHealth {
 export const workspaceHandleRequestSchema = z.object({ handle: z.string().uuid() });
 export const indexWorkspaceRequestSchema = workspaceHandleRequestSchema.extend({ requestId: z.string().min(1).max(100) });
 export const cancelIndexRequestSchema = z.object({ requestId: z.string().min(1).max(100) });
-export const saveUserStateRequestSchema = workspaceHandleRequestSchema.extend({ state: userWorkspaceStateSchema });
+export const saveUserStateRequestSchema = workspaceHandleRequestSchema.extend({
+  generation: z.number().int().nonnegative(),
+  state: userWorkspaceStateSchema,
+});
 export const indexProgressEnvelopeSchema = z.object({
   requestId: z.string().min(1),
   progress: z.object({
@@ -53,15 +57,37 @@ export interface IndexProgressEnvelope {
 
 export type IndexProgressListener = (event: IndexProgressEnvelope) => void;
 
+export type IndexWorkspaceResult =
+  | { readonly status: 'completed' | 'partial'; readonly snapshot: AdapterIndexSnapshot }
+  | { readonly status: 'cancelled' }
+  | { readonly status: 'failed'; readonly message: string };
+
+export const indexWorkspaceResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('completed'), snapshot: adapterIndexSnapshotSchema }),
+  z.object({ status: z.literal('partial'), snapshot: adapterIndexSnapshotSchema }),
+  z.object({ status: z.literal('cancelled') }),
+  z.object({ status: z.literal('failed'), message: z.string().min(1) }),
+]);
+
+export interface SaveUserStateResult {
+  readonly status: 'saved' | 'stale';
+  readonly generation: number;
+}
+
+export const saveUserStateResultSchema = z.object({
+  status: z.enum(['saved', 'stale']),
+  generation: z.number().int().nonnegative(),
+});
+
 export interface XanaduDesktopApi {
   getAppInfo(): Promise<AppInfo>;
   selectWorkspace(): Promise<WorkspaceSummary | null>;
   getUtilityHealth(): Promise<UtilityHealth>;
-  indexWorkspace(request: { readonly handle: string; readonly requestId: string }): Promise<AdapterIndexSnapshot>;
+  indexWorkspace(request: { readonly handle: string; readonly requestId: string }): Promise<IndexWorkspaceResult>;
   cancelIndex(request: { readonly requestId: string }): Promise<boolean>;
   onIndexProgress(listener: IndexProgressListener): () => void;
   loadUserState(request: { readonly handle: string }): Promise<UserWorkspaceState>;
-  saveUserState(request: { readonly handle: string; readonly state: UserWorkspaceState }): Promise<void>;
+  saveUserState(request: { readonly handle: string; readonly generation: number; readonly state: UserWorkspaceState }): Promise<SaveUserStateResult>;
   clearIndexCache(request: { readonly handle: string }): Promise<void>;
 }
 

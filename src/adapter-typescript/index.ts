@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import ts from '@typescript/typescript6';
+import { SecureTypeScriptSystem, type WorkspacePathViolation } from './secure-system.js';
 import type {
   AdapterCallContext,
   AdapterHealth,
@@ -68,7 +69,7 @@ export const typescriptAdapterManifest: LanguageAdapterManifest = {
     controlFlow: true,
     loops: true,
     stableIds: 'relocatable',
-    incrementalUpdate: true,
+    incrementalUpdate: false,
     externalEndpoints: true,
   },
   runtime: { kind: 'bundled-node', entrypoint: 'adapter-typescript/index.js' },
@@ -122,18 +123,40 @@ const collectFiles = async (rootPath: string): Promise<readonly string[]> => {
 export const createFileSystemAdapterHost = (
   rootPath: string,
   onProgress: (progress: IndexProgress) => void = () => undefined,
-): AdapterHost => ({
-  listFiles: () => collectFiles(rootPath),
-  readFile: async (projectRelativePath, expectedRevision) => {
-    const content = await fs.readFile(resolveInside(rootPath, projectRelativePath), 'utf8');
+): AdapterHost => {
+  const secureSystem = new SecureTypeScriptSystem(rootPath);
+  return {
+  listFiles: () => collectFiles(secureSystem.rootPath),
+  readFile: (projectRelativePath, expectedRevision) => {
+    let candidate: string;
+    try {
+      candidate = resolveInside(secureSystem.rootPath, projectRelativePath);
+    } catch {
+      return Promise.reject(new Error('Workspace file access rejected'));
+    }
+    const content = secureSystem.readFile(candidate);
+    if (content === undefined) return Promise.reject(new Error('Workspace file access rejected'));
     const revision = sha256(content);
-    if (expectedRevision !== undefined && expectedRevision !== revision) throw new Error('Source revision changed');
-    return { content, revision };
+    if (expectedRevision !== undefined && expectedRevision !== revision) return Promise.reject(new Error('Source revision changed'));
+    return Promise.resolve({ content, revision });
   },
   now: () => new Date().toISOString(),
   hash: sha256,
   reportProgress: onProgress,
+  };
+};
+
+const securityDiagnostic = (violation: WorkspacePathViolation, index: number): Diagnostic => ({
+  id: `diagnostic:security:${violation.code}:${index}`,
+  code: violation.code,
+  severity: 'error',
+  phase: 'read',
+  scope: 'project',
+  recoverability: 'requires-user-action',
+  message: `Rejected unauthorized workspace entry: ${violation.entryName}`,
 });
+
+const yieldToEventLoop = (): Promise<void> => new Promise((resolvePromise) => setImmediate(resolvePromise));
 
 interface FragmentRecord {
   readonly fragment: FunctionFragment;
@@ -272,23 +295,41 @@ const estimateForLoop = (node: ts.IterationStatement, file: FileRecord): Iterati
     const expression = node.expression.getText(file.compiler);
     return { kind: 'expression', expression: `Object.keys(${expression}).length`, source: sourceAnchor(file.model, rangeOf(node.expression, file.compiler)) };
   }
-  if (
-    ts.isForStatement(node) &&
-    node.initializer !== undefined &&
-    ts.isVariableDeclarationList(node.initializer) &&
-    node.initializer.declarations.length === 1 &&
-    node.condition !== undefined &&
-    ts.isBinaryExpression(node.condition) &&
-    (node.condition.operatorToken.kind === ts.SyntaxKind.LessThanToken || node.condition.operatorToken.kind === ts.SyntaxKind.LessThanEqualsToken) &&
-    ts.isNumericLiteral(node.condition.right)
-  ) {
-    const declaration = node.initializer.declarations[0];
-    const initial = declaration?.initializer;
-    if (initial !== undefined && ts.isNumericLiteral(initial)) {
-      const inclusive = node.condition.operatorToken.kind === ts.SyntaxKind.LessThanEqualsToken ? 1 : 0;
-      const value = Math.max(0, Number(node.condition.right.text) - Number(initial.text) + inclusive);
-      return { kind: 'upper-bound', value, proofRange: sourceAnchor(file.model, rangeOf(node, file.compiler)) };
-    }
+  if (!ts.isForStatement(node) || node.initializer === undefined || !ts.isVariableDeclarationList(node.initializer) ||
+    node.initializer.declarations.length !== 1 || node.condition === undefined || !ts.isBinaryExpression(node.condition) ||
+    node.incrementor === undefined) return { kind: 'unknown' };
+  const declaration = node.initializer.declarations[0];
+  if (declaration === undefined || !ts.isIdentifier(declaration.name) || declaration.initializer === undefined || !ts.isNumericLiteral(declaration.initializer) ||
+    !ts.isIdentifier(node.condition.left) || node.condition.left.text !== declaration.name.text || !ts.isNumericLiteral(node.condition.right)) return { kind: 'unknown' };
+  const variable = declaration.name.text;
+  let step = 0;
+  if ((ts.isPrefixUnaryExpression(node.incrementor) || ts.isPostfixUnaryExpression(node.incrementor)) && ts.isIdentifier(node.incrementor.operand) && node.incrementor.operand.text === variable) {
+    if (node.incrementor.operator === ts.SyntaxKind.PlusPlusToken) step = 1;
+    if (node.incrementor.operator === ts.SyntaxKind.MinusMinusToken) step = -1;
+  } else if (ts.isBinaryExpression(node.incrementor) && ts.isIdentifier(node.incrementor.left) && node.incrementor.left.text === variable && ts.isNumericLiteral(node.incrementor.right)) {
+    if (node.incrementor.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken) step = Number(node.incrementor.right.text);
+    if (node.incrementor.operatorToken.kind === ts.SyntaxKind.MinusEqualsToken) step = -Number(node.incrementor.right.text);
+  }
+  if (step === 0) return { kind: 'unknown' };
+  const start = Number(declaration.initializer.text);
+  const bound = Number(node.condition.right.text);
+  const operator = node.condition.operatorToken.kind;
+  let value: number | undefined;
+  if (step > 0 && (operator === ts.SyntaxKind.LessThanToken || operator === ts.SyntaxKind.LessThanEqualsToken)) {
+    const distance = bound - start;
+    value = operator === ts.SyntaxKind.LessThanToken
+      ? Math.max(0, Math.ceil(distance / step))
+      : distance < 0 ? 0 : Math.floor(distance / step) + 1;
+  }
+  if (step < 0 && (operator === ts.SyntaxKind.GreaterThanToken || operator === ts.SyntaxKind.GreaterThanEqualsToken)) {
+    const distance = start - bound;
+    const magnitude = Math.abs(step);
+    value = operator === ts.SyntaxKind.GreaterThanToken
+      ? Math.max(0, Math.ceil(distance / magnitude))
+      : distance < 0 ? 0 : Math.floor(distance / magnitude) + 1;
+  }
+  if (value !== undefined && Number.isFinite(value)) {
+    return { kind: 'upper-bound', value, proofRange: sourceAnchor(file.model, rangeOf(node, file.compiler)) };
   }
   return { kind: 'unknown' };
 };
@@ -305,20 +346,22 @@ const extractLoopControl = (
   node: ts.IterationStatement,
   file: FileRecord,
   loopId: string,
-  conditionAnchor: SourceAnchor,
+  continueTarget: SourceAnchor,
 ): { readonly continueEdges: readonly LoopControlEdge[]; readonly exitEdges: readonly LoopExitEdge[] } => {
   const continueEdges: LoopControlEdge[] = [];
   const exitEdges: LoopExitEdge[] = [];
-  const visit = (current: ts.Node): void => {
+  const loopLabel = ts.isLabeledStatement(node.parent) && node.parent.statement === node ? node.parent.label.text : undefined;
+  const visit = (current: ts.Node, nestedLoopDepth: number): void => {
     if (current !== node.statement && ts.isFunctionLike(current)) return;
-    if (current !== node.statement && ts.isIterationStatement(current, false)) return;
     const currentAnchor = sourceAnchor(file.model, rangeOf(current, file.compiler));
     if (ts.isContinueStatement(current)) {
-      continueEdges.push({ id: `${loopId}:continue:${current.pos}`, kind: 'continue', source: currentAnchor, target: conditionAnchor });
+      const targetsCurrent = current.label === undefined ? nestedLoopDepth === 0 : current.label.text === loopLabel;
+      if (targetsCurrent) continueEdges.push({ id: `${loopId}:continue:${current.pos}`, kind: 'continue', source: currentAnchor, target: continueTarget });
       return;
     }
     if (ts.isBreakStatement(current)) {
-      exitEdges.push({ id: `${loopId}:break:${current.pos}`, reason: 'break', source: currentAnchor });
+      const exitsCurrent = current.label === undefined ? nestedLoopDepth === 0 : current.label.text === loopLabel;
+      if (exitsCurrent) exitEdges.push({ id: `${loopId}:break:${current.pos}`, reason: 'break', source: currentAnchor });
       return;
     }
     if (ts.isReturnStatement(current)) {
@@ -329,9 +372,10 @@ const extractLoopControl = (
       exitEdges.push({ id: `${loopId}:throw:${current.pos}`, reason: 'throw', source: currentAnchor });
       return;
     }
-    ts.forEachChild(current, visit);
+    const nextDepth = current !== node.statement && ts.isIterationStatement(current, false) ? nestedLoopDepth + 1 : nestedLoopDepth;
+    ts.forEachChild(current, (child) => visit(child, nextDepth));
   };
-  visit(node.statement);
+  visit(node.statement, 0);
   return { continueEdges, exitEdges };
 };
 
@@ -346,7 +390,11 @@ const extractLoops = (files: readonly FileRecord[], fragments: readonly Fragment
           const condition = conditionForLoop(node);
           const conditionAnchor = sourceAnchor(file.model, condition === undefined ? rangeOf(node, file.compiler) : rangeOf(condition, file.compiler));
           const bodyAnchor = sourceAnchor(file.model, rangeOf(node.statement, file.compiler));
-          const control = extractLoopControl(node, file, id, conditionAnchor);
+          const continueTarget = ts.isForStatement(node) && node.incrementor !== undefined
+            ? sourceAnchor(file.model, rangeOf(node.incrementor, file.compiler))
+            : conditionAnchor;
+          const entryTarget = ts.isDoStatement(node) ? bodyAnchor : conditionAnchor;
+          const control = extractLoopControl(node, file, id, continueTarget);
           const source = sourceAnchor(file.model, rangeOf(node, file.compiler));
           loops.push({
             id: loopRegionId(id),
@@ -356,8 +404,8 @@ const extractLoops = (files: readonly FileRecord[], fragments: readonly Fragment
             ...(condition === undefined ? {} : { condition: conditionAnchor }),
             body: bodyAnchor,
             bodyFunctionIds: [],
-            entryEdges: [{ id: `${id}:entry`, kind: 'entry', source, target: conditionAnchor }],
-            backEdges: [{ id: `${id}:back`, kind: 'back', source: bodyAnchor, target: conditionAnchor }],
+            entryEdges: [{ id: `${id}:entry`, kind: 'entry', source, target: entryTarget }],
+            backEdges: [{ id: `${id}:back`, kind: 'back', source: bodyAnchor, target: continueTarget }],
             continueEdges: control.continueEdges,
             exitEdges: [
               { id: `${id}:condition-false`, reason: 'condition-false', source: conditionAnchor },
@@ -572,24 +620,46 @@ class TypeScriptSession implements AdapterSession {
     private readonly host: AdapterHost,
   ) {}
 
-  async index(_request: IndexRequest, sink: IndexEventSink, context: AdapterCallContext): Promise<IndexSummary> {
+  async index(request: IndexRequest, sink: IndexEventSink, context: AdapterCallContext): Promise<IndexSummary> {
     if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics: [] };
     this.host.reportProgress({ phase: 'read', completed: 0, message: '读取 tsconfig.json' });
     await this.host.readFile(this.configuration);
-    const configPath = resolveInside(this.rootPath, this.configuration);
-    const config = ts.readConfigFile(configPath, (fileName) => ts.sys.readFile(fileName));
+    await yieldToEventLoop();
+    if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics: [] };
+    const secureSystem = new SecureTypeScriptSystem(this.rootPath);
+    const configPath = resolveInside(secureSystem.rootPath, this.configuration);
+    const config = ts.readConfigFile(configPath, secureSystem.readFile);
     const diagnostics: Diagnostic[] = [];
+    if (request.changedFiles !== undefined && request.changedFiles.length > 0) {
+      diagnostics.push({
+        id: 'diagnostic:incremental-unavailable',
+        code: 'INCREMENTAL_UNAVAILABLE',
+        severity: 'info',
+        phase: 'read',
+        scope: 'adapter',
+        recoverability: 'retryable',
+        message: 'This adapter reports incrementalUpdate=false; a full authorized re-index was used.',
+      });
+    }
     if (config.error !== undefined) {
       diagnostics.push(diagnosticFromCompiler(config.error, new Map()));
       sink.emit({ type: 'diagnostics', diagnostics });
       return { status: 'failed', filesIndexed: 0, diagnostics };
     }
-    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath), undefined, configPath);
-    const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options });
+    const parsed = ts.parseJsonConfigFileContent(config.config, secureSystem.createParseConfigHost(), secureSystem.rootPath, undefined, configPath);
+    await yieldToEventLoop();
+    if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics };
+    const program = ts.createProgram({
+      rootNames: parsed.fileNames,
+      options: parsed.options,
+      host: secureSystem.createCompilerHost(parsed.options),
+    });
+    await yieldToEventLoop();
+    if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics };
     const compilerFiles = program.getSourceFiles().filter((file) =>
       !file.isDeclarationFile && isPathInside(this.rootPath, file.fileName) && (file.fileName.endsWith('.ts') || file.fileName.endsWith('.tsx')));
 
-    const rawDiagnostics = [...program.getConfigFileParsingDiagnostics(), ...program.getSyntacticDiagnostics(), ...program.getSemanticDiagnostics()];
+    const rawDiagnostics = [...parsed.errors, ...program.getConfigFileParsingDiagnostics(), ...program.getSyntacticDiagnostics(), ...program.getSemanticDiagnostics()];
     const rawErrorFiles = new Set(rawDiagnostics.filter((item) => item.category === ts.DiagnosticCategory.Error).map((item) => item.file?.fileName).filter((value): value is string => value !== undefined));
     const now = this.host.now();
     const fileRecords = compilerFiles.map((compiler): FileRecord => {
@@ -615,6 +685,7 @@ class TypeScriptSession implements AdapterSession {
     const loops = attachLoopFunctions(initialLoops, relations);
     const filesByCompilerPath = new Map(fileRecords.map((file) => [file.compiler.fileName, file]));
     diagnostics.push(...rawDiagnostics.map((item) => diagnosticFromCompiler(item, filesByCompilerPath)));
+    diagnostics.push(...secureSystem.violations.map(securityDiagnostic));
 
     for (const [index, file] of fileRecords.entries()) {
       if (context.signal.aborted) return { status: 'cancelled', filesIndexed: index, diagnostics };
@@ -667,8 +738,11 @@ class TypeScriptSession implements AdapterSession {
 
 export class TypeScriptLanguageAdapter implements LanguageAdapter {
   readonly manifest = typescriptAdapterManifest;
+  private readonly rootPath: string;
 
-  constructor(private readonly rootPath: string) {}
+  constructor(rootPath: string) {
+    this.rootPath = new SecureTypeScriptSystem(rootPath).rootPath;
+  }
 
   getHealth(): AdapterHealth {
     return { status: 'healthy', checkedAt: new Date().toISOString() };
@@ -703,14 +777,22 @@ export class TypeScriptLanguageAdapter implements LanguageAdapter {
   }
 }
 
-export const indexTypeScriptProject = async (
+export type ProjectIndexOperationResult =
+  | { readonly status: 'completed' | 'partial'; readonly snapshot: AdapterIndexSnapshot }
+  | { readonly status: 'cancelled' }
+  | { readonly status: 'failed'; readonly message: string };
+
+export const indexTypeScriptProjectOperation = async (
   rootPath: string,
   signal = new AbortController().signal,
   onProgress: (progress: IndexProgress) => void = () => undefined,
-): Promise<AdapterIndexSnapshot> => {
+  changedFiles?: readonly string[],
+): Promise<ProjectIndexOperationResult> => {
+  if (signal.aborted) return { status: 'cancelled' };
   const host = createFileSystemAdapterHost(rootPath, onProgress);
   const adapter = new TypeScriptLanguageAdapter(rootPath);
   const candidateFiles = await host.listFiles(typescriptAdapterManifest.detection.filePatterns);
+  if (signal.aborted) return { status: 'cancelled' };
   const context: AdapterCallContext = { requestId: `index:${basename(rootPath)}`, generation: 1, signal };
   const detection = await adapter.detectProject({ candidateFiles }, context);
   const sourceFiles: SourceFile[] = [];
@@ -720,7 +802,7 @@ export const indexTypeScriptProject = async (
   const loops: LoopRegion[] = [];
   const diagnostics: Diagnostic[] = [];
   if (detection.status !== 'matched') {
-    return { manifest: adapter.manifest, health: adapter.getHealth(), detection, sourceFiles, sourceContents, fragments, relations, loops, diagnostics };
+    return { status: 'failed', message: detection.status === 'limited' ? detection.reason : 'TypeScript project was not matched' };
   }
   const configuration = detection.configurations[0];
   const session = await adapter.openSession({
@@ -728,11 +810,14 @@ export const indexTypeScriptProject = async (
     ...(configuration === undefined ? {} : { configuration }),
   }, host);
   const events: IndexEvent[] = [];
+  let summary: IndexSummary;
   try {
-    await session.index({}, { emit: (event) => events.push(event) }, context);
+    summary = await session.index(changedFiles === undefined ? {} : { changedFiles }, { emit: (event) => events.push(event) }, context);
   } finally {
     await session.dispose();
   }
+  if (summary.status === 'cancelled') return { status: 'cancelled' };
+  if (summary.status === 'failed') return { status: 'failed', message: summary.diagnostics[0]?.message ?? 'TypeScript indexing failed' };
   for (const event of events) {
     switch (event.type) {
       case 'file':
@@ -758,5 +843,16 @@ export const indexTypeScriptProject = async (
   const health: AdapterHealth = diagnostics.some((item) => item.severity === 'error')
     ? { status: 'degraded', checkedAt: host.now(), diagnostics }
     : adapter.getHealth();
-  return { manifest: adapter.manifest, health, detection, sourceFiles, sourceContents, fragments, relations, loops, diagnostics };
+  const snapshot = { manifest: adapter.manifest, health, detection, sourceFiles, sourceContents, fragments, relations, loops, diagnostics };
+  return { status: summary.status, snapshot };
+};
+
+export const indexTypeScriptProject = async (
+  rootPath: string,
+  signal = new AbortController().signal,
+  onProgress: (progress: IndexProgress) => void = () => undefined,
+): Promise<AdapterIndexSnapshot> => {
+  const result = await indexTypeScriptProjectOperation(rootPath, signal, onProgress);
+  if (result.status === 'completed' || result.status === 'partial') return result.snapshot;
+  throw new Error(result.status === 'failed' ? result.message : 'TypeScript indexing was cancelled');
 };
