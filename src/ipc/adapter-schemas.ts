@@ -48,6 +48,8 @@ const fragmentSchema = z.object({
     recipeVersion: z.union([z.literal(1), z.literal(2)]),
     signatureHash: idSchema,
     declarationFingerprint: idSchema,
+    lexicalFingerprint: idSchema,
+    containerFingerprint: idSchema,
   }),
   provenance: provenanceSchema,
 });

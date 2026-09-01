@@ -46,7 +46,7 @@ const fragment = (id: typeof createId, name: string): FunctionFragment => {
     fullRange: { start: fullStart, end: fullEnd },
     definitionRange: { start: declarationStart, end: declarationStart + name.length },
     bodyRange: { start: content.indexOf('{', declarationStart), end: fullEnd },
-    identity: { recipeVersion: 1, signatureHash: `signature:${name}`, declarationFingerprint: `fingerprint:${name}` },
+    identity: { recipeVersion: 1, signatureHash: `signature:${name}`, declarationFingerprint: `fingerprint:${name}`, lexicalFingerprint: `lexical:${name}`, containerFingerprint: `container:${name}` },
     provenance: {
       source: 'adapter', projectRelativePath: 'src/order.ts', revision,
       range: { start: fullStart, end: fullEnd },

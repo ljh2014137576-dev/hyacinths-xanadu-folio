@@ -213,6 +213,15 @@ const structuralOrdinal = (node: ts.Node, parent: ts.Node, predicate: (candidate
 
 const normalizedSyntax = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
+const structuralFingerprint = (node: ts.Node): string => {
+  const value = ts.isIdentifier(node) || ts.isPrivateIdentifier(node) ? node.text
+    : ts.isStringLiteral(node) || ts.isNumericLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text
+      : '';
+  const children: string[] = [];
+  ts.forEachChild(node, (child) => children.push(structuralFingerprint(child)));
+  return `${node.kind}${value.length > 0 ? `:${normalizedSyntax(value)}` : ''}[${children.join(',')}]`;
+};
+
 const lexicalCallPath = (node: ts.Node, owner: ts.Node): string => {
   const segments: number[] = [];
   let current = node;
@@ -249,8 +258,10 @@ const blockDiscriminator = (block: ts.Block, sourceFile: ts.SourceFile): string 
       ? structuralOrdinal(tryStatement, tryStatement.parent, ts.isTryStatement)
       : 0;
     const variable = parent.variableDeclaration?.name.getText(sourceFile) ?? 'anonymous';
-    const shape = `${ts.isTryStatement(tryStatement) && tryStatement.finallyBlock !== undefined ? 'finally' : 'no-finally'}:${variable}`;
-    return `try:${ordinal}:${sha256(normalizedSyntax(shape)).slice(0, 10)}:catch:${variable}`;
+    const tryShape = ts.isTryStatement(tryStatement)
+      ? `${structuralFingerprint(tryStatement.tryBlock)}|${structuralFingerprint(parent.block)}|${tryStatement.finallyBlock === undefined ? 'none' : structuralFingerprint(tryStatement.finallyBlock)}`
+      : `catch:${variable}`;
+    return `try:${ordinal}:${sha256(tryShape).slice(0, 16)}:catch:${variable}`;
   }
   if (ts.isCaseClause(parent) || ts.isDefaultClause(parent)) {
     const clauseIndex = structuralOrdinal(parent, parent.parent, (candidate) => ts.isCaseClause(candidate) || ts.isDefaultClause(candidate));
@@ -320,7 +331,9 @@ const extractFragments = (
         const signatureHash = sha256(signatureText).slice(0, 24);
         const bodyText = 'body' in node && node.body !== undefined ? node.body.getText(file.compiler).replace(/\s+/g, ' ').trim() : '';
         const declarationFingerprint = sha256(`${symbolKindOf(node)}:${signatureHash}:${bodyText}`).slice(0, 24);
-        const idInput = `v2:${projectLogicalId}:${file.model.projectRelativePath}:${qualified}:${signatureHash}:${declarationFingerprint}`;
+        const lexicalFingerprint = sha256(qualified.split('.').slice(0, -1).join('.')).slice(0, 24);
+        const containerFingerprint = sha256(qualified.split('.').slice(0, -1).join('|')).slice(0, 24);
+        const idInput = `v2:${projectLogicalId}:${file.model.projectRelativePath}:${qualified}:${lexicalFingerprint}:${containerFingerprint}:${signatureHash}:${declarationFingerprint}`;
         const fragment: FunctionFragment = {
           id: symbolId(`symbol:${sha256(idInput).slice(0, 24)}`),
           sourceFileId: file.model.id,
@@ -331,7 +344,7 @@ const extractFragments = (
           fullRange,
           definitionRange: named.range,
           ...(body === undefined ? {} : { bodyRange: body }),
-          identity: { recipeVersion: 2, signatureHash, declarationFingerprint },
+          identity: { recipeVersion: 2, signatureHash, declarationFingerprint, lexicalFingerprint, containerFingerprint },
           provenance: {
             source: 'adapter',
             projectRelativePath: file.model.projectRelativePath,
