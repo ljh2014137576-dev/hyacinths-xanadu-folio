@@ -91,6 +91,8 @@ npm run start
 
 详细设计见 [架构文档](docs/architecture.md)、[需求映射](docs/requirements-mapping.md)和 [MVP 实施计划](docs/mvp-plan.md)。依赖用途、许可证和风险见 [依赖说明](docs/dependencies.md)。
 
+MVP 的显式 Vite build、HTML CodeSurface 和增量延期见 [ADR-0004](docs/adr/0004-mvp-implementation-variances.md)；可靠增量索引由 [Issue #17](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/17) 在 MVP 0.2 跟踪。
+
 ## MVP 范围限制
 
 - 首版只加载随应用发布的 TypeScript adapter；任意第三方规则包安装、签名和权限模型属于后续阶段。

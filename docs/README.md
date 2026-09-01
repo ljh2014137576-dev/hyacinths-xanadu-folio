@@ -9,6 +9,7 @@
 - `adr/0001-application-stack.md`
 - `adr/0002-language-adapter-contract.md`
 - `adr/0003-flow-rendering-model.md`
+- `adr/0004-mvp-implementation-variances.md`
 - `mvp-plan.md`
 - `dependencies.md`
 - `screenshots/standard-view.png`

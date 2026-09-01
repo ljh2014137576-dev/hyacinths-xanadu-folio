@@ -139,14 +139,14 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 
 - 固定官方 `@typescript/typescript6` 补丁版本。
 - 证明 Program/TypeChecker 可解析 fixture import/alias/method。
-- 证明 offsets 与 CodeMirror UTF-16 positions 一致。
+- 证明 TypeScript offsets 与当前 HTML CodeSurface UTF-16 positions 一致；CodeMirror 迁移门见 ADR-0004。
 - 记录对 TypeScript 7 项目的 capability/limited 行为。
 
 失败条件：必须依赖私有 `typescript/lib` API或不能给出精确目标范围。失败时回到 ADR 评审，不得用正则完成演示。
 
-### Spike 2：CodeMirror + SVG anchor
+### Spike 2：CodeSurface + SVG anchor
 
-- 两个只读 source surfaces，一条调用范围到定义范围的 SVG path。
+- MVP 采用 ADR-0004 的只读 HTML CodeSurface port；两个 source surfaces 与一条调用范围到定义范围的 SVG path。
 - 覆盖多行、长行、scroll、zoom、resize、字体变化和 offscreen target。
 - 自动测试世界坐标转换与 stale generation。
 
@@ -160,13 +160,13 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 
 失败条件：原生 driver 无可靠预构建/ABI 路径。启用原子 JSON StoragePort fallback，并为 SQLite 迁移保留 Issue/ADR。
 
-### Spike 4：Forge Vite build
+### Spike 4：显式 Vite build
 
-- main/preload/renderer 独立 bundle。
+- main/utility、单文件 sandbox preload、renderer 独立 bundle；ADR-0004 将 Forge packaging 延至分发阶段。
 - sandbox/context isolation/CSP 运行。
 - production build 与启动 smoke 成功。
 
-失败时回退为显式 Vite build + Forge packaging；不擅自切换 Tauri 或取消 Vite。
+当前显式 Vite/tsc build 已通过 CI；未来 packaging 迁移必须满足 ADR-0004 平台门槛，不擅自切换 Tauri 或取消 Vite。
 
 ## 4. 同一 builder PR 的内部提交序列
 
@@ -174,7 +174,7 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 
 ### A1：质量门与应用外壳（#3、#12 部分）
 
-- npm workspaces、lockfile、strict tsconfig、lint/test/build scripts。
+- 单根包（达到第二个发布单元时再引入 npm workspaces）、lockfile、strict tsconfig、lint/test/build scripts，见 ADR-0004。
 - Electron main/preload/renderer + utility process hello/health。
 - CI 从文档 bootstrap 切换为真实 install/lint/typecheck/test/build。
 - 安全设置、typed IPC skeleton、README 命令骨架。
@@ -192,9 +192,9 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 - resolved/ambiguous/unresolved/external、partial file diagnostics。
 - 禁止 AST 跨合同。
 
-### A4：索引、增量与出站投影（#4）
+### A4：索引、可取消重建与出站投影（#4）
 
-- batch transaction、progress/cancel、search。
+- batch transaction、progress/cancel、search；MVP 0.1 全量重建且 capability=false，可靠增量进入 MVP 0.2 #17。
 - outgoing-only expansion、cycle/max-depth guard。
 - last-good/stale revision 与 storage port。
 
@@ -281,7 +281,7 @@ Spikes 必须输出测试/ADR 结论，不提交长期旁路实现。
 | #1 通用模型 | SourceFile、FunctionFragment、RelationBridge、FlowPage、BusinessNode、LoopRegion、Provenance 可序列化、严格类型检查和 schema 测试通过 |
 | #2 LanguageAdapter | manifest、版本/能力/健康、测试 adapter、取消/partial failure 合同测试通过，核心无 TypeScript AST 类型 |
 | #3 应用外壳 | Electron/React/Vite 可开发启动和生产构建；main/preload/utility/renderer 边界、安全项目选择及 README 命令验证通过 |
-| #4 索引 | 渐进、取消、增量/失败恢复、搜索、outgoing-only、cycle/max-depth 测试通过 |
+| #4 索引 | 渐进、取消、失败恢复、搜索、outgoing-only、cycle/max-depth 测试通过；增量 capability=false 并由 ADR-0004/MVP 0.2 #17 跟踪 |
 | #5 TypeScript 规则包 | 正式 Compiler API 解析 tsconfig、函数/方法、跨文件 import/alias、调用目标与精确范围；不确定调用不伪装 resolved |
 | #6 来源桥梁 | call-site→target-definition 精确锚定；scroll/zoom/resize、状态线型/标签、unresolved 几何测试通过 |
 | #7 标准视图 | 左目录/中央源码 FlowPage/右来源详情可运行，源码是主体，主要交互测试通过 |

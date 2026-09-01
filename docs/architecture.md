@@ -4,6 +4,8 @@
 
 更新：2026-09-01
 
+实施说明：MVP 0.1 的具体 build、CodeSurface 和 incremental capability 由 [ADR-0004](adr/0004-mvp-implementation-variances.md) 细化。架构中的 Forge/CodeMirror/增量会话描述是可替换目标，不是当前依赖事实。
+
 ## 1. 架构目标
 
 Xanadu Code Flow Browser 是本地优先的静态代码阅读器。它从用户选择的入口出发，只沿向外引用展开，把源码片段组织为连续流程页，并用可交互桥梁连接具体调用范围与具体目标定义范围。
@@ -74,7 +76,7 @@ preload 只暴露按用例命名的方法，例如 `selectWorkspace()`、`startI
 - 文件系统适配器和工作区根目录防护。
 - AdapterRegistry 与每项目 AdapterSession。
 - TypeScript `Program`/语言服务或未来其他解析器实例。
-- 符号、关系、控制流、来源和诊断的增量索引。
+- 符号、关系、控制流、来源和诊断的索引；MVP 0.1 为受控全量重建，MVP 0.2 #17 才启用增量会话。
 - 本地持久化事务。
 
 utility process 是故障隔离边界，不是对恶意规则包的完整安全沙箱。完整 MVP 纵向切片必须加载随应用发布且列入 allowlist 的内置 TypeScript adapter，并展示 manifest、能力和健康状态；任意第三方来源代码的安装、签名和权限模型不属于该切片。
@@ -324,7 +326,7 @@ Adapter manifest 声明：
 
 1. 文件 watcher 合并短时间内的事件并计算 revision。
 2. index-core 根据依赖表标记该文件的符号、出站关系以及受其导出影响的解析结果为 stale。
-3. adapter 使用增量会话重建受影响部分；新结果在事务内替换旧 revision。
+3. 目标架构由 adapter 使用增量会话重建受影响部分；MVP 0.1 当前执行可取消全量重建，MVP 0.2 #17 完成后才替换此步骤。
 4. FlowPage 保留位置，但带旧 anchor 的 placement 标记 stale；成功 relocation 后显式更新。
 5. relocation 不确定时保留原 placement 和诊断，要求用户选择，不静默跳转。
 
@@ -344,7 +346,7 @@ Adapter manifest 声明：
 - 所有 schema 迁移有前向版本号、备份和回滚失败诊断。
 - 保存 FlowPage/BusinessNode 使用事务；JSON 导出使用临时文件加原子 rename。
 - 数据库只保存项目相对路径；授权根目录单独保存在受信任 workspace registry。
-- 启动时检测未完成事务、adapter 版本变化和内容 fingerprint，优先恢复最后成功快照再增量刷新。
+- 启动时检测未完成事务、adapter 版本变化和内容 fingerprint，优先恢复最后成功快照；MVP 0.1 全量刷新，未来 #17 增量刷新。
 - SQLite 驱动必须藏在 StoragePort 后。若采用原生 Node 扩展，Electron ABI 重建和打包需要 CI smoke test；在验证前不得让领域模块直接依赖具体驱动。
 
 替代方案：单一 JSON 文件实现简单但不适合增量关系查询和事务；IndexedDB 把索引所有权错误地放到 renderer；把配置默认写入项目仓库会制造未授权修改并泄露本地状态。
@@ -366,7 +368,7 @@ Adapter manifest 声明：
 
 ## 10. UI 与桥梁坐标模型
 
-源码表面使用 CodeMirror 6 的只读实例，直接使用其 UTF-16 position 与 decoration API；不引入 React wrapper，以便控制实例生命周期和测量。CodeMirror 官方开发仓库在 2026 年迁移至自托管 Forgejo，GitHub archive 不代表停止维护，但增加单维护者与供应链跟踪风险，必须精确锁版本并保留替换适配层。
+目标源码表面可使用 CodeMirror 6 的只读实例。MVP 0.1 当前使用 ADR-0004 的只读 HTML CodeSurface port，以 UTF-16 range span 和 SVG overlay 实现同一 anchor 合同；CodeMirror 保留为达到虚拟化迁移门槛后的后端。
 
 代码块和 SVG overlay 位于同一 `FlowCanvas` 世界坐标系。每个可连接范围注册 `AnchorHandle`：
 
@@ -398,7 +400,7 @@ SVG 是 MVP 的桥梁渲染方案：每条 path 保留 DOM 身份，便于 point
 - `model`：范围、解析联合类型、LoopRegion、FlowPage 序列化和 schema migration。
 - `adapter-contract`：所有 adapter 运行同一套合约测试；测试 adapter 证明核心与 TypeScript 解耦。
 - TypeScript fixtures：跨文件 import、重载/别名、方法调用、动态调用、循环、break/continue/return/throw、递归、语法错误。
-- index/projection：出站-only、不无限展开、partial index、取消、过期响应、增量无效化。
+- index/projection：出站-only、不无限展开、partial index、取消、过期响应；增量无效化属于 MVP 0.2 #17 的新增门禁。
 - bridge geometry：滚动、缩放、容器 resize、端点卸载、RTL/长行、不同 DPI。
 - component：关系状态不只靠颜色、隐藏分支可恢复、模式状态共享、键盘抽屉。
 - Electron smoke：选择 fixture、索引、打开 createOrder 流程、来源往返、重启恢复。
@@ -411,7 +413,7 @@ CI 必须运行 `npm ci`、lint、strict typecheck、unit/component tests、buil
 2. **精确锚点与虚拟化冲突。** CodeMirror 只渲染可见区域；未挂载范围不能用猜测坐标连接。桥梁适配层和 stub 状态必须先于大规模优化建立。
 3. **稳定符号身份被高估。** 移动/改名只能启发式重新匹配；revision 和 relocation 证据必须持久化。
 4. **第三方 adapter 执行风险。** utility process 提供故障隔离但不是完整沙箱；MVP 不开放任意安装源。
-5. **Electron Forge Vite 插件仍标记 experimental。** 需要精确锁版本、构建 smoke 和受控升级，不能依赖私有插件行为。
+5. **桌面打包尚未进入 MVP。** ADR-0004 采用显式 Vite/tsc build；Forge 或其他 packager 只有在平台打包、签名和 utility smoke 通过后才能接入。
 6. **原生 SQLite 驱动打包。** Electron ABI、跨平台预构建和签名可能增加 CI 成本；必须保持 StoragePort 可替换。
 7. **关系密度和视觉噪声。** 通过当前关系高亮、来源折叠、边缘 stub、标签与线型处理，不能通过删除或隐藏不确定性“优化”。
 8. **静态事实被误读为运行事实。** 模型命名、UI 文案和测试中禁止 `executedPath`、`actualIterationCount` 等字段进入 MVP。
