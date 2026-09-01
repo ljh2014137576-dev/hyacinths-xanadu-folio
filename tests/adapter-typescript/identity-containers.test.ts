@@ -37,6 +37,7 @@ export function overloaded(value: number | string): number | string { return val
     if (result.status !== 'completed') throw new Error('identity project failed');
     const ids = result.snapshot.fragments.map((fragment) => fragment.id);
     expect(new Set(ids).size).toBe(ids.length);
+    expect(result.snapshot.fragments.filter((fragment) => fragment.identity.recipeVersion === 2).every((fragment) => fragment.identity.containerSemanticFingerprint !== undefined && fragment.identity.lexicalParentFingerprint !== undefined)).toBe(true);
     const helperNames = result.snapshot.fragments.filter((fragment) => fragment.displayName === 'helper').map((fragment) => fragment.qualifiedName);
     expect(helperNames).toEqual(expect.arrayContaining([
       'outerA.helper', 'outerB.helper', 'SpaceA.helper', 'SpaceB.helper', 'Service.methodA.helper', 'Service.methodB.helper',

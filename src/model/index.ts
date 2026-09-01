@@ -72,8 +72,10 @@ export interface FunctionFragment {
     readonly recipeVersion: 1 | 2;
     readonly signatureHash: string;
     readonly declarationFingerprint: string;
-    readonly lexicalFingerprint: string;
-    readonly containerFingerprint: string;
+    readonly lexicalFingerprint?: string;
+    readonly containerFingerprint?: string;
+    readonly lexicalParentFingerprint?: string;
+    readonly containerSemanticFingerprint?: string;
   };
   readonly provenance: Provenance;
 }

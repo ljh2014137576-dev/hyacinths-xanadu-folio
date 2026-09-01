@@ -222,6 +222,20 @@ const structuralFingerprint = (node: ts.Node): string => {
   return `${node.kind}${value.length > 0 ? `:${normalizedSyntax(value)}` : ''}[${children.join(',')}]`;
 };
 
+const semanticContainerFingerprint = (node: ts.Node, sourceFile: ts.SourceFile): string => {
+  let current: ts.Node | undefined = node.parent;
+  while (current !== undefined) {
+    if (ts.isCatchClause(current) && ts.isTryStatement(current.parent)) {
+      const owner = current.parent;
+      const binding = current.variableDeclaration === undefined ? 'none' : structuralFingerprint(current.variableDeclaration.name);
+      const shape = `${structuralFingerprint(owner.tryBlock)}|${binding}|${structuralFingerprint(current.block)}|${owner.finallyBlock === undefined ? 'none' : structuralFingerprint(owner.finallyBlock)}`;
+      return sha256(shape).slice(0, 24);
+    }
+    current = current.parent;
+  }
+  return sha256(`${sourceFile.languageVariant}:${node.kind}`).slice(0, 24);
+};
+
 const lexicalCallPath = (node: ts.Node, owner: ts.Node): string => {
   const segments: number[] = [];
   let current = node;
@@ -332,8 +346,10 @@ const extractFragments = (
         const bodyText = 'body' in node && node.body !== undefined ? node.body.getText(file.compiler).replace(/\s+/g, ' ').trim() : '';
         const declarationFingerprint = sha256(`${symbolKindOf(node)}:${signatureHash}:${bodyText}`).slice(0, 24);
         const lexicalFingerprint = sha256(qualified.split('.').slice(0, -1).join('.')).slice(0, 24);
+        const lexicalParentFingerprint = sha256(qualified.split('.').slice(0, -1).join('.').replace(/try:\d+:/g, 'try:')).slice(0, 24);
         const containerFingerprint = sha256(qualified.split('.').slice(0, -1).join('|')).slice(0, 24);
-        const idInput = `v2:${projectLogicalId}:${file.model.projectRelativePath}:${qualified}:${lexicalFingerprint}:${containerFingerprint}:${signatureHash}:${declarationFingerprint}`;
+        const containerSemanticFingerprint = semanticContainerFingerprint(node, file.compiler);
+        const idInput = `v2:${projectLogicalId}:${file.model.projectRelativePath}:${qualified}:${containerSemanticFingerprint}:${signatureHash}:${declarationFingerprint}`;
         const fragment: FunctionFragment = {
           id: symbolId(`symbol:${sha256(idInput).slice(0, 24)}`),
           sourceFileId: file.model.id,
@@ -344,7 +360,7 @@ const extractFragments = (
           fullRange,
           definitionRange: named.range,
           ...(body === undefined ? {} : { bodyRange: body }),
-          identity: { recipeVersion: 2, signatureHash, declarationFingerprint, lexicalFingerprint, containerFingerprint },
+          identity: { recipeVersion: 2, signatureHash, declarationFingerprint, lexicalFingerprint, containerFingerprint, lexicalParentFingerprint, containerSemanticFingerprint },
           provenance: {
             source: 'adapter',
             projectRelativePath: file.model.projectRelativePath,
