@@ -1,10 +1,16 @@
 {
-  "name": "xanadu-code-flow-browser",
+  "name": "hyacinths-xanadu-folio",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "dist-electron/electron/main.js",
-  "description": "Local-first Xanadu-style TypeScript code flow browser",
+  "description": "A source-first code flow reader for understanding unfamiliar repositories",
+  "license": "GPL-2.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ljh2014137576-dev/hyacinths-xanadu-folio.git"
+  },
+  "homepage": "https://github.com/ljh2014137576-dev/hyacinths-xanadu-folio#readme",
   "scripts": {
     "dev": "npm run build:electron && concurrently -k -s first \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite --host 127.0.0.1",
