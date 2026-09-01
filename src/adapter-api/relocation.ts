@@ -7,8 +7,10 @@ export const relocateFunctionFragments = (
 ): readonly RelocationMatch[] => previous.map((oldFragment) => {
   const exact = current.find((candidate) => candidate.id === oldFragment.id);
   if (exact !== undefined) return { status: 'matched', previousId: oldFragment.id, currentId: exact.id, certainty: 'exact', evidence: ['stable identity recipe matched'] };
+  const semanticKey = (fragment: FunctionFragment): string => fragment.qualifiedName.replace(/try:\d+:/g, 'try:')
+    .replace(/:catch:([^.]*)/g, ':catch:$1');
   const sameQualifiedSignature = current.filter((candidate) =>
-    candidate.qualifiedName === oldFragment.qualifiedName && candidate.symbolKind === oldFragment.symbolKind &&
+    semanticKey(candidate) === semanticKey(oldFragment) && candidate.symbolKind === oldFragment.symbolKind &&
     candidate.identity.signatureHash === oldFragment.identity.signatureHash);
   if (sameQualifiedSignature.length === 1 && sameQualifiedSignature[0] !== undefined) {
     return { status: 'matched', previousId: oldFragment.id, currentId: sameQualifiedSignature[0].id, certainty: 'probable', evidence: ['qualified name and signature matched after declaration change'] };
