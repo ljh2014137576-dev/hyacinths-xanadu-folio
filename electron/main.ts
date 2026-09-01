@@ -29,6 +29,7 @@ import type { IndexProgress } from '../src/adapter-api/index.js';
 import { parseUserWorkspaceState } from '../src/model/index.js';
 import { JsonStorage } from '../src/storage/json-storage.js';
 import { isTrustedSenderUrl } from '../src/ipc/security.js';
+import { relocateFunctionFragments } from '../src/adapter-api/relocation.js';
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 interface WorkspaceRecord {
@@ -199,10 +200,15 @@ const installIpcHandlers = (): void => {
     assertTrustedRequest(event);
     const parsed = indexWorkspaceRequestSchema.parse(request);
     const workspace = getWorkspace(parsed.handle);
+    const previousCache = await workspace.storage.loadIndexCache();
     const result = await runUtilityIndex(workspace.rootPath, parsed.requestId, (progress) => {
       event.sender.send(IPC_CHANNELS.indexProgress, { requestId: parsed.requestId, progress });
     });
-    if (result.status === 'completed') await workspace.storage.saveIndexCache(result.snapshot);
+    if (result.status === 'completed' || result.status === 'partial') {
+      const relocation = previousCache === undefined ? [] : relocateFunctionFragments(previousCache.fragments, result.snapshot.fragments);
+      if (result.status === 'completed') await workspace.storage.saveIndexCache(result.snapshot);
+      return { ...result, relocation };
+    }
     return result;
   });
 

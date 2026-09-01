@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import ts from '@typescript/typescript6';
 import { SecureTypeScriptSystem, type WorkspacePathViolation } from './secure-system.js';
+import { relocateFunctionFragments } from '../adapter-api/relocation.js';
 import type {
   AdapterCallContext,
   AdapterHealth,
@@ -126,7 +127,9 @@ export const createFileSystemAdapterHost = (
 ): AdapterHost => {
   const secureSystem = new SecureTypeScriptSystem(rootPath);
   return {
-  listFiles: () => collectFiles(secureSystem.rootPath),
+  listFiles: () => secureSystem.fileExists(resolve(secureSystem.rootPath, 'tsconfig.json'))
+    ? Promise.resolve(['tsconfig.json'])
+    : collectFiles(secureSystem.rootPath),
   readFile: (projectRelativePath, expectedRevision) => {
     let candidate: string;
     try {
@@ -237,7 +240,11 @@ const extractFragments = (
         const fullRange = rangeOf(fullNode, file.compiler);
         const body = 'body' in node && node.body !== undefined ? rangeOf(node.body, file.compiler) : undefined;
         const qualified = qualifiedName(node, named.name);
-        const idInput = `${projectLogicalId}:${file.model.projectRelativePath}:${qualified}:${node.parameters.length}:${fullRange.start}`;
+        const signatureText = `${node.typeParameters?.map((parameter) => parameter.getText(file.compiler)).join(',') ?? ''}(${node.parameters.map((parameter) => `${parameter.dotDotDotToken === undefined ? '' : '...'}${parameter.name.getText(file.compiler)}${parameter.questionToken === undefined ? '' : '?'}:${parameter.type?.getText(file.compiler) ?? 'inferred'}`).join(',')}):${node.type?.getText(file.compiler) ?? 'inferred'}`;
+        const signatureHash = sha256(signatureText).slice(0, 24);
+        const bodyText = 'body' in node && node.body !== undefined ? node.body.getText(file.compiler).replace(/\s+/g, ' ').trim() : '';
+        const declarationFingerprint = sha256(`${symbolKindOf(node)}:${signatureHash}:${bodyText}`).slice(0, 24);
+        const idInput = `${projectLogicalId}:${file.model.projectRelativePath}:${qualified}:${signatureHash}:${declarationFingerprint}`;
         const fragment: FunctionFragment = {
           id: symbolId(`symbol:${sha256(idInput).slice(0, 24)}`),
           sourceFileId: file.model.id,
@@ -248,6 +255,7 @@ const extractFragments = (
           fullRange,
           definitionRange: named.range,
           ...(body === undefined ? {} : { bodyRange: body }),
+          identity: { recipeVersion: 1, signatureHash, declarationFingerprint },
           provenance: {
             source: 'adapter',
             projectRelativePath: file.model.projectRelativePath,
@@ -627,6 +635,16 @@ class TypeScriptSession implements AdapterSession {
     await yieldToEventLoop();
     if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics: [] };
     const secureSystem = new SecureTypeScriptSystem(this.rootPath);
+    try {
+      await secureSystem.prepareProjectFileIndex(context.signal, (completed) => this.host.reportProgress({
+        phase: 'read',
+        completed,
+        message: `枚举受控项目文件 ${completed}`,
+      }));
+    } catch (error: unknown) {
+      if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics: [] };
+      throw error;
+    }
     const configPath = resolveInside(secureSystem.rootPath, this.configuration);
     const config = ts.readConfigFile(configPath, secureSystem.readFile);
     const diagnostics: Diagnostic[] = [];
@@ -723,10 +741,7 @@ class TypeScriptSession implements AdapterSession {
   }
 
   relocateSymbols(request: RelocateRequest): Promise<readonly RelocationMatch[]> {
-    const currentIds = new Set(this.fragments.map((record) => record.fragment.id));
-    return Promise.resolve(request.previous.map((previous) => currentIds.has(symbolId(previous.symbolId))
-      ? { status: 'matched', previousId: previous.symbolId, currentId: previous.symbolId, certainty: 'exact', evidence: ['stable declaration fingerprint'] }
-      : { status: 'missing', previousId: previous.symbolId }));
+    return Promise.resolve(relocateFunctionFragments(request.previous, this.fragments.map((record) => record.fragment)));
   }
 
   dispose(): Promise<void> {

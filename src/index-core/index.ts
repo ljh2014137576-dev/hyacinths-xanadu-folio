@@ -1,6 +1,7 @@
-import type { AdapterIndexSnapshot } from '../adapter-api/index.js';
+import type { AdapterIndexSnapshot, RelocationMatch } from '../adapter-api/index.js';
 import {
   flowPageId,
+  symbolId,
   type BranchViewFilter,
   type BusinessNode,
   type FlowPage,
@@ -8,6 +9,7 @@ import {
   type RelationBridge,
   type RelationId,
   type SymbolId,
+  type UserWorkspaceState,
 } from '../model/index.js';
 
 const revisionFor = (snapshot: AdapterIndexSnapshot): string =>
@@ -243,3 +245,58 @@ export const outgoingRelations = (
   snapshot: AdapterIndexSnapshot,
   sourceFragmentId: SymbolId,
 ): readonly RelationBridge[] => snapshot.relations.filter((relation) => relation.sourceFragmentId === sourceFragmentId);
+
+export const migrateUserAssets = (
+  state: UserWorkspaceState,
+  relocation: readonly RelocationMatch[],
+): { readonly state: UserWorkspaceState; readonly unresolved: readonly RelocationMatch[] } => {
+  const replacements = new Map(relocation.flatMap((match) => match.status === 'matched' ? [[match.previousId, match.currentId] as const] : []));
+  const replace = (id: string): string => replacements.get(id) ?? id;
+  return {
+    state: {
+      ...state,
+      flowPages: state.flowPages.map((page) => ({
+        ...page,
+        entry: page.entry.kind === 'function' ? { ...page.entry, id: replace(page.entry.id) } : page.entry,
+        placements: page.placements.map((placement) => placement.kind === 'business-node'
+          ? placement
+          : { ...placement, targetId: symbolId(replace(placement.targetId)) }),
+      })),
+      businessNodes: state.businessNodes.map((node) => ({
+        ...node,
+        members: node.members.map((member) => ({ ...member, fragmentId: symbolId(replace(member.fragmentId)) })),
+      })),
+    },
+    unresolved: relocation.filter((match) => match.status !== 'matched'),
+  };
+};
+
+export const rebuildMigratedFlowPages = (
+  state: UserWorkspaceState,
+  snapshot: AdapterIndexSnapshot,
+): UserWorkspaceState => ({
+  ...state,
+  flowPages: state.flowPages.map((page) => {
+    const rebuilt = page.entry.kind === 'function'
+      ? (() => {
+          const fragment = snapshot.fragments.find((candidate) => candidate.id === page.entry.id);
+          return fragment === undefined ? undefined : buildFlowPage(snapshot, fragment.id, { pageName: page.name });
+        })()
+      : page.entry.kind === 'business-node'
+        ? (() => {
+            const node = state.businessNodes.find((candidate) => candidate.id === page.entry.id);
+            return node === undefined ? undefined : buildBusinessNodeFlowPage(snapshot, node);
+          })()
+        : undefined;
+    return rebuilt === undefined ? page : {
+      ...rebuilt,
+      id: page.id,
+      name: page.name,
+      mode: page.mode,
+      viewport: page.viewport,
+      collapsedRegions: page.collapsedRegions,
+      branchFilter: page.branchFilter,
+      hiddenSummary: { hiddenBranches: 0, hiddenRelations: 0, restoreAvailable: false },
+    };
+  }),
+});

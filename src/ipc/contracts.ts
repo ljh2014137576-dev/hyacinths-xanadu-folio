@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AdapterIndexSnapshot, IndexProgress } from '../adapter-api/index.js';
+import type { AdapterIndexSnapshot, IndexProgress, RelocationMatch } from '../adapter-api/index.js';
 import { userWorkspaceStateSchema, type UserWorkspaceState } from '../model/index.js';
 import { adapterIndexSnapshotSchema } from './adapter-schemas.js';
 
@@ -58,13 +58,21 @@ export interface IndexProgressEnvelope {
 export type IndexProgressListener = (event: IndexProgressEnvelope) => void;
 
 export type IndexWorkspaceResult =
-  | { readonly status: 'completed' | 'partial'; readonly snapshot: AdapterIndexSnapshot }
+  | { readonly status: 'completed' | 'partial'; readonly snapshot: AdapterIndexSnapshot; readonly relocation?: readonly RelocationMatch[] }
   | { readonly status: 'cancelled' }
   | { readonly status: 'failed'; readonly message: string };
 
 export const indexWorkspaceResultSchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('completed'), snapshot: adapterIndexSnapshotSchema }),
-  z.object({ status: z.literal('partial'), snapshot: adapterIndexSnapshotSchema }),
+  z.object({ status: z.literal('completed'), snapshot: adapterIndexSnapshotSchema, relocation: z.array(z.discriminatedUnion('status', [
+    z.object({ status: z.literal('matched'), previousId: z.string().min(1), currentId: z.string().min(1), certainty: z.enum(['exact', 'probable']), evidence: z.array(z.string()) }),
+    z.object({ status: z.literal('ambiguous'), previousId: z.string().min(1), candidates: z.array(z.string().min(1)).min(1), evidence: z.array(z.string()).min(1) }),
+    z.object({ status: z.literal('missing'), previousId: z.string().min(1), evidence: z.array(z.string()).min(1) }),
+  ])).optional() }),
+  z.object({ status: z.literal('partial'), snapshot: adapterIndexSnapshotSchema, relocation: z.array(z.discriminatedUnion('status', [
+    z.object({ status: z.literal('matched'), previousId: z.string().min(1), currentId: z.string().min(1), certainty: z.enum(['exact', 'probable']), evidence: z.array(z.string()) }),
+    z.object({ status: z.literal('ambiguous'), previousId: z.string().min(1), candidates: z.array(z.string().min(1)).min(1), evidence: z.array(z.string()).min(1) }),
+    z.object({ status: z.literal('missing'), previousId: z.string().min(1), evidence: z.array(z.string()).min(1) }),
+  ])).optional() }),
   z.object({ status: z.literal('cancelled') }),
   z.object({ status: z.literal('failed'), message: z.string().min(1) }),
 ]);

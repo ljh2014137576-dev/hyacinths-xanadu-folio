@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AdapterIndexSnapshot, IndexProgress } from '../adapter-api/index.js';
 import type { AppInfo, UtilityHealth, WorkspaceSummary } from '../ipc/contracts.js';
 import type { UserWorkspaceState } from '../model/index.js';
+import { migrateUserAssets, rebuildMigratedFlowPages } from '../index-core/index.js';
 import { WorkspaceView } from './components/WorkspaceView.js';
 
 export function App(): React.JSX.Element {
@@ -11,6 +12,7 @@ export function App(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<AdapterIndexSnapshot | null>(null);
   const [userState, setUserState] = useState<UserWorkspaceState | null>(null);
   const [indexStatus, setIndexStatus] = useState<'completed' | 'partial'>('completed');
+  const [relocationWarnings, setRelocationWarnings] = useState(0);
   const [progress, setProgress] = useState<IndexProgress | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,9 +50,17 @@ export function App(): React.JSX.Element {
         return;
       }
       if (indexResult.status === 'failed') throw new Error(indexResult.message);
+      const relocation = indexResult.relocation ?? [];
+      const migration = migrateUserAssets(restored, relocation);
+      const identityChanged = relocation.some((match) => match.status === 'matched' && match.previousId !== match.currentId);
+      const migratedState = identityChanged ? rebuildMigratedFlowPages(migration.state, indexResult.snapshot) : migration.state;
       setSnapshot(indexResult.snapshot);
       setIndexStatus(indexResult.status);
-      setUserState(restored);
+      setUserState(migratedState);
+      setRelocationWarnings(migration.unresolved.length);
+      if (identityChanged) {
+        await window.xanadu.saveUserState({ handle: selected.handle, generation: Date.now(), state: migratedState });
+      }
       setProgress({
         phase: 'persist',
         completed: indexResult.snapshot.sourceFiles.length,
@@ -75,6 +85,7 @@ export function App(): React.JSX.Element {
         snapshot={snapshot}
         initialState={userState}
         indexStatus={indexStatus}
+        relocationWarnings={relocationWarnings}
         onPersist={(state, generation) => window.xanadu.saveUserState({ handle: workspace.handle, generation, state })}
         onChooseAnother={() => {
           setWorkspace(null);
@@ -82,6 +93,7 @@ export function App(): React.JSX.Element {
           setUserState(null);
           setProgress(null);
           setIndexStatus('completed');
+          setRelocationWarnings(0);
         }}
       />
     );

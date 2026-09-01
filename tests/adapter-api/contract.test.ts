@@ -38,7 +38,7 @@ const session: AdapterSession = {
     return Promise.resolve({ status: 'completed', filesIndexed: 1, diagnostics: [] });
   },
   getSourceFragment: () => Promise.resolve({ status: 'missing' }),
-  relocateSymbols: (request) => Promise.resolve(request.previous.map((item) => ({ status: 'missing', previousId: item.symbolId }))),
+  relocateSymbols: (request) => Promise.resolve(request.previous.map((item) => ({ status: 'missing', previousId: item.id, evidence: ['test adapter has no candidates'] }))),
   dispose: () => Promise.resolve(),
 };
 

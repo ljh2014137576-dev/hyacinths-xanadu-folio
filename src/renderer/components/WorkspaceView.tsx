@@ -20,6 +20,7 @@ interface WorkspaceViewProps {
   readonly snapshot: AdapterIndexSnapshot;
   readonly initialState: UserWorkspaceState;
   readonly indexStatus: 'completed' | 'partial';
+  readonly relocationWarnings: number;
   readonly onPersist: (state: UserWorkspaceState, generation: number) => Promise<SaveUserStateResult>;
   readonly onChooseAnother: () => void;
 }
@@ -427,7 +428,7 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
             <div className="zoom-controls"><button type="button" aria-label="缩小" onClick={() => updatePage({ ...activePage, viewport: { ...activePage.viewport, zoom: Math.max(0.65, activePage.viewport.zoom - 0.1) } })}>−</button><span>{Math.round(activePage.viewport.zoom * 100)}%</span><button type="button" aria-label="放大" onClick={() => updatePage({ ...activePage, viewport: { ...activePage.viewport, zoom: Math.min(1.5, activePage.viewport.zoom + 0.1) } })}>＋</button></div>
           </>
         )}
-        <div className="toolbar-status"><span className={`status-dot status-dot--${props.snapshot.health.status}`} />{props.snapshot.manifest.displayName} {props.snapshot.manifest.adapterVersion}<small>{props.indexStatus === 'partial' ? '部分索引 · 查看诊断' : saveStatus === 'saving' ? '保存中…' : saveStatus === 'error' ? '保存失败' : '本地已保存'}</small></div>
+        <div className="toolbar-status"><span className={`status-dot status-dot--${props.snapshot.health.status}`} />{props.snapshot.manifest.displayName} {props.snapshot.manifest.adapterVersion}<small>{props.relocationWarnings > 0 ? `${props.relocationWarnings} 个来源需要确认` : props.indexStatus === 'partial' ? '部分索引 · 查看诊断' : saveStatus === 'saving' ? '保存中…' : saveStatus === 'error' ? '保存失败' : '本地已保存'}</small></div>
         <button type="button" className="button-secondary" onClick={props.onChooseAnother}>切换项目</button>
       </header>
 

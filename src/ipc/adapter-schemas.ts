@@ -44,6 +44,11 @@ const fragmentSchema = z.object({
   fullRange: rangeSchema,
   definitionRange: rangeSchema,
   bodyRange: rangeSchema.optional(),
+  identity: z.object({
+    recipeVersion: z.literal(1),
+    signatureHash: idSchema,
+    declarationFingerprint: idSchema,
+  }),
   provenance: provenanceSchema,
 });
 const candidateSchema = z.object({ targetId: idSchema, targetDefinition: anchorSchema, label: z.string().min(1) });

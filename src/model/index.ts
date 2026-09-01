@@ -68,6 +68,11 @@ export interface FunctionFragment {
   readonly fullRange: TextRange;
   readonly definitionRange: TextRange;
   readonly bodyRange?: TextRange;
+  readonly identity: {
+    readonly recipeVersion: 1;
+    readonly signatureHash: string;
+    readonly declarationFingerprint: string;
+  };
   readonly provenance: Provenance;
 }
 

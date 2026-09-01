@@ -79,7 +79,8 @@ export class JsonStorage {
 
   async loadIndexCache(): Promise<AdapterIndexSnapshot | undefined> {
     const value = await readJson(this.cachePath);
-    if (value === undefined || typeof value !== 'object' || value === null) return undefined;
+    if (value === undefined || typeof value !== 'object' || value === null || !('fragments' in value) || !Array.isArray(value.fragments)) return undefined;
+    if (value.fragments.some((fragment: unknown) => typeof fragment !== 'object' || fragment === null || !('identity' in fragment))) return undefined;
     return value as AdapterIndexSnapshot;
   }
 

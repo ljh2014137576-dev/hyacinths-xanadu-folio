@@ -1,6 +1,6 @@
 import {
   existsSync,
-  lstatSync,
+  promises as fs,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import ts from '@typescript/typescript6';
+import { minimatch } from 'minimatch';
 
 export interface WorkspacePathViolation {
   readonly code: 'WORKSPACE_PATH_ESCAPE' | 'WORKSPACE_SYMLINK_ESCAPE';
@@ -31,32 +32,6 @@ const nearestExistingAncestor = (candidate: string): string => {
   return current;
 };
 
-const globToRegExp = (pattern: string): RegExp => {
-  let expression = '^';
-  for (let index = 0; index < pattern.length; index += 1) {
-    const character = pattern[index];
-    const next = pattern[index + 1];
-    if (character === '*' && next === '*') {
-      if (pattern[index + 2] === '/') {
-        expression += '(?:.*/)?';
-        index += 2;
-      } else {
-        expression += '.*';
-        index += 1;
-      }
-    } else if (character === '*') {
-      expression += '[^/]*';
-    } else if (character === '?') {
-      expression += '[^/]';
-    } else if (character !== undefined && '\\^$+?.()|{}[]'.includes(character)) {
-      expression += `\\${character}`;
-    } else {
-      expression += character ?? '';
-    }
-  }
-  return new RegExp(`${expression}$`, 'i');
-};
-
 const safePattern = (rootDirectory: string, pattern: string, workspaceRoot: string): boolean => {
   const prefix = pattern.split(/[*?]/, 1)[0] ?? '';
   return isContained(workspaceRoot, resolve(rootDirectory, prefix.length === 0 ? '.' : prefix));
@@ -66,13 +41,21 @@ export class SecureTypeScriptSystem {
   readonly rootPath: string;
   readonly violations: WorkspacePathViolation[] = [];
   private readonly trustedLibRoot: string;
-  private readonly projectFiles: readonly string[];
+  private projectFiles: readonly string[] = [];
+  private prepared = false;
   private readonly violationKeys = new Set<string>();
 
   constructor(rootPath: string, compilerOptions: ts.CompilerOptions = {}) {
     this.rootPath = realpathSync.native(resolve(rootPath));
     this.trustedLibRoot = realpathSync.native(dirname(ts.getDefaultLibFilePath(compilerOptions)));
-    this.projectFiles = this.collectProjectFiles();
+  }
+
+  get enumeratedFileCount(): number {
+    return this.projectFiles.length;
+  }
+
+  get enumeratedProjectRelativePaths(): readonly string[] {
+    return this.projectFiles.map((file) => normalize(relative(this.rootPath, file)));
   }
 
   private record(code: WorkspacePathViolation['code'], candidate: string): void {
@@ -116,24 +99,50 @@ export class SecureTypeScriptSystem {
     return absolute;
   }
 
-  private collectProjectFiles(): readonly string[] {
+  async prepareProjectFileIndex(
+    signal: AbortSignal,
+    onProgress: (completedFiles: number) => void = () => undefined,
+  ): Promise<void> {
+    if (this.prepared) return;
+    const excludedDirectories = new Set(['.git', '.tmp', 'node_modules', 'dist', 'dist-electron', 'build', 'out', 'coverage', 'vendor', 'generated', 'test-results', 'playwright-report']);
     const files: string[] = [];
-    const visit = (directory: string): void => {
-      for (const entry of readdirSync(directory, { withFileTypes: true })) {
-        if (entry.name === '.git' || entry.name === 'dist' || entry.name === 'dist-electron') continue;
+    const queue = [this.rootPath];
+    let processedEntries = 0;
+    while (queue.length > 0) {
+      if (signal.aborted) throw new Error('Workspace enumeration cancelled');
+      const directory = queue.shift();
+      if (directory === undefined) continue;
+      const entries = await fs.readdir(directory, { withFileTypes: true });
+      for (const entry of entries) {
+        if (signal.aborted) throw new Error('Workspace enumeration cancelled');
         const candidate = resolve(directory, entry.name);
-        const details = lstatSync(candidate);
-        if (details.isSymbolicLink()) {
+        if (entry.isSymbolicLink()) {
           const target = realpathSync.native(candidate);
           if (!isContained(this.rootPath, target)) this.record('WORKSPACE_SYMLINK_ESCAPE', candidate);
           continue;
         }
-        if (details.isDirectory()) visit(candidate);
-        else if (details.isFile()) files.push(candidate);
+        if (entry.isDirectory()) {
+          if (!excludedDirectories.has(entry.name)) queue.push(candidate);
+        } else if (entry.isFile()) {
+          files.push(candidate);
+        }
+        processedEntries += 1;
+        if (processedEntries % 128 === 0) {
+          onProgress(files.length);
+          await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+        }
       }
-    };
-    visit(this.rootPath);
-    return files;
+    }
+    this.projectFiles = files;
+    this.prepared = true;
+    onProgress(files.length);
+  }
+
+  private expandDirectoryPattern(root: string, pattern: string): string {
+    const normalized = normalize(pattern).replace(/^\.\//, '').replace(/\/$/, '');
+    if (/[*?]/.test(normalized)) return normalized;
+    const candidate = resolve(root, normalized.length === 0 ? '.' : normalized);
+    return this.directoryExists(candidate) ? `${normalized}/**/*` : normalized;
   }
 
   readonly fileExists = (fileName: string): boolean => {
@@ -179,15 +188,16 @@ export class SecureTypeScriptSystem {
       return safe;
     });
     const safeExcludes = (excludes ?? []).filter((pattern) => safePattern(root, pattern, this.rootPath));
-    const includeMatchers = safeIncludes.map((pattern) => globToRegExp(normalize(pattern)));
-    const excludeMatchers = safeExcludes.map((pattern) => globToRegExp(normalize(pattern)));
+    const includePatterns = safeIncludes.map((pattern) => this.expandDirectoryPattern(root, pattern));
+    const excludePatterns = safeExcludes.map((pattern) => this.expandDirectoryPattern(root, pattern));
     return this.projectFiles.filter((file) => {
       if (!isContained(root, file)) return false;
       if (extensions.length > 0 && !extensions.includes(extname(file))) return false;
       const pathFromRoot = normalize(relative(root, file));
       if (depth !== undefined && pathFromRoot.split('/').length - 1 > depth) return false;
-      if (!includeMatchers.some((matcher) => matcher.test(pathFromRoot))) return false;
-      return !excludeMatchers.some((matcher) => matcher.test(pathFromRoot));
+      const matchOptions = { dot: true, nocase: !ts.sys.useCaseSensitiveFileNames } as const;
+      if (!includePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions))) return false;
+      return !excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
     });
   };
 

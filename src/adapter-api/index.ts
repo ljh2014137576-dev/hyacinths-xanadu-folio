@@ -149,7 +149,7 @@ export type SourceFragmentResult =
   | { readonly status: 'missing' };
 
 export interface RelocateRequest {
-  readonly previous: readonly { readonly symbolId: string; readonly anchor: SourceAnchor }[];
+  readonly previous: readonly FunctionFragment[];
 }
 
 export type RelocationMatch =
@@ -160,8 +160,8 @@ export type RelocationMatch =
       readonly certainty: 'exact' | 'probable';
       readonly evidence: readonly string[];
     }
-  | { readonly status: 'ambiguous'; readonly previousId: string; readonly candidates: readonly string[] }
-  | { readonly status: 'missing'; readonly previousId: string };
+  | { readonly status: 'ambiguous'; readonly previousId: string; readonly candidates: readonly string[]; readonly evidence: readonly string[] }
+  | { readonly status: 'missing'; readonly previousId: string; readonly evidence: readonly string[] };
 
 export interface AdapterSession {
   index(request: IndexRequest, sink: IndexEventSink, context: AdapterCallContext): Promise<IndexSummary>;
