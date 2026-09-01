@@ -7,8 +7,8 @@ export const relocateFunctionFragments = (
 ): readonly RelocationMatch[] => previous.map((oldFragment) => {
   const semanticKey = (fragment: FunctionFragment): string => [
     fragment.provenance.projectRelativePath,
-    fragment.identity.lexicalFingerprint,
-    fragment.identity.containerFingerprint,
+    fragment.identity.lexicalParentFingerprint ?? fragment.identity.lexicalFingerprint ?? fragment.qualifiedName,
+    fragment.identity.containerSemanticFingerprint ?? fragment.identity.containerFingerprint ?? fragment.identity.declarationFingerprint,
     fragment.symbolKind,
     fragment.identity.signatureHash,
     fragment.identity.declarationFingerprint,
