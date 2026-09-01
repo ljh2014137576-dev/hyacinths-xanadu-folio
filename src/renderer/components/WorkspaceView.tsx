@@ -21,6 +21,7 @@ interface WorkspaceViewProps {
   readonly initialState: UserWorkspaceState;
   readonly indexStatus: 'completed' | 'partial';
   readonly relocationWarnings: number;
+  readonly persistenceEnabled: boolean;
   readonly onPersist: (state: UserWorkspaceState, generation: number) => Promise<SaveUserStateResult>;
   readonly onChooseAnother: () => void;
 }
@@ -204,6 +205,10 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
   const commit = (next: UserWorkspaceState): void => {
     stateRef.current = next;
     setUserState(next);
+    if (!props.persistenceEnabled) {
+      setSaveStatus('saved');
+      return;
+    }
     setSaveStatus('saving');
     persistGeneration.current += 1;
     void props.onPersist(next, persistGeneration.current)
@@ -337,7 +342,10 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
   };
 
   const actOnMigration = (migrationId: string, action: { readonly kind: 'confirm'; readonly candidateId: string } | { readonly kind: 'keep-stale' } | { readonly kind: 'remove' }): void => {
-    commit(resolvePendingMigration(userState, migrationId, action));
+    commit(resolvePendingMigration(userState, migrationId, action, {
+      symbolIds: new Set(props.snapshot.fragments.map((fragment) => fragment.id)),
+      relationIds: new Set(props.snapshot.relations.map((relation) => relation.id)),
+    }));
   };
 
   const projectRail = (
@@ -345,7 +353,7 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
       <div className="rail-heading"><span>PROJECT</span><strong>{props.workspace.displayName}</strong></div>
       <label className="search-field"><span>搜索文件、函数、方法或业务节点</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="createOrder" /></label>
       <div className="rail-actions">
-        <button type="button" disabled={selectedMembers.size < 2} onClick={() => setBusinessDialog(true)}>创建业务节点 · {selectedMembers.size}</button>
+        <button type="button" disabled={selectedMembers.size < 2 || !props.persistenceEnabled} onClick={() => setBusinessDialog(true)}>创建业务节点 · {selectedMembers.size}</button>
       </div>
       {search.length === 0 ? (
         <nav className="project-tree" aria-label="项目目录树"><DirectoryBranch node={directoryTree} snapshot={props.snapshot} onOpenFile={setSourceFileId} onOpenFragment={openFragment} selectedMembers={selectedMembers} onToggleMember={toggleMember} /></nav>
@@ -362,7 +370,8 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
             <div className="business-node-actions"><button type="button" onClick={() => openBusinessNode(node)}><strong>◇ {node.name}</strong><span>{node.members.length} 个函数 · 打开 FlowPage</span></button><button type="button" aria-label={`${node.presentation.collapsedByDefault ? '展开' : '折叠'} ${node.name}`} onClick={() => updateBusiness(setBusinessNodeCollapsed(node, !node.presentation.collapsedByDefault, new Date().toISOString()))}>{node.presentation.collapsedByDefault ? '＋' : '−'}</button></div>
             {!node.presentation.collapsedByDefault && node.members.slice().sort((a, b) => a.order - b.order).map((member) => {
               const fragment = props.snapshot.fragments.find((item) => item.id === member.fragmentId);
-              return fragment === undefined ? null : <button className="business-member" type="button" key={member.fragmentId} onClick={() => openFragment(fragment.id)}><strong>{member.order + 1}. {fragment.displayName}</strong><small>{fragment.provenance.projectRelativePath} [{fragment.fullRange.start}, {fragment.fullRange.end})</small></button>;
+              const stale = userState.staleAssets?.find((asset) => asset.kind === 'symbol' && asset.previousId === member.fragmentId);
+              return fragment === undefined ? stale === undefined ? null : <div className="business-member stale-member" key={member.fragmentId}><strong>{member.order + 1}. stale member</strong><small>{stale.previousId} · {stale.evidence.join(' · ')}</small></div> : <button className="business-member" type="button" key={member.fragmentId} onClick={() => openFragment(fragment.id)}><strong>{member.order + 1}. {fragment.displayName}</strong><small>{fragment.provenance.projectRelativePath} [{fragment.fullRange.start}, {fragment.fullRange.end})</small></button>;
             })}
           </article>
         ))}</section>
@@ -374,6 +383,7 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
     <FlowCanvas
       snapshot={props.snapshot}
       businessNodes={userState.businessNodes}
+      staleAssets={userState.staleAssets ?? []}
       page={activePage}
       relationStates={branchProjection.states}
       {...(selectedRelationId === undefined ? {} : { selectedRelationId })}
@@ -432,7 +442,7 @@ export function WorkspaceView(props: WorkspaceViewProps): React.JSX.Element {
             <div className="zoom-controls"><button type="button" aria-label="缩小" onClick={() => updatePage({ ...activePage, viewport: { ...activePage.viewport, zoom: Math.max(0.65, activePage.viewport.zoom - 0.1) } })}>−</button><span>{Math.round(activePage.viewport.zoom * 100)}%</span><button type="button" aria-label="放大" onClick={() => updatePage({ ...activePage, viewport: { ...activePage.viewport, zoom: Math.min(1.5, activePage.viewport.zoom + 0.1) } })}>＋</button></div>
           </>
         )}
-        <div className="toolbar-status"><span className={`status-dot status-dot--${props.snapshot.health.status}`} />{props.snapshot.manifest.displayName} {props.snapshot.manifest.adapterVersion}<small>{(userState.pendingMigrations?.length ?? props.relocationWarnings) > 0 ? `${userState.pendingMigrations?.length ?? props.relocationWarnings} 个来源需要确认` : props.indexStatus === 'partial' ? '部分索引 · 查看诊断' : saveStatus === 'saving' ? '保存中…' : saveStatus === 'error' ? '保存失败' : '本地已保存'}</small></div>
+        <div className="toolbar-status"><span className={`status-dot status-dot--${props.snapshot.health.status}`} />{props.snapshot.manifest.displayName} {props.snapshot.manifest.adapterVersion}<small>{(userState.pendingMigrations?.length ?? props.relocationWarnings) > 0 ? `${userState.pendingMigrations?.length ?? props.relocationWarnings} 个来源需要确认` : props.indexStatus === 'partial' ? '部分索引预览 · 用户资产不保存' : saveStatus === 'saving' ? '保存中…' : saveStatus === 'error' ? '保存失败' : '本地已保存'}</small></div>
         <button type="button" className="button-secondary" onClick={props.onChooseAnother}>切换项目</button>
       </header>
 

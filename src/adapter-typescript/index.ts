@@ -205,10 +205,49 @@ const symbolKindOf = (node: ts.Node): FunctionFragment['symbolKind'] => {
   return 'function';
 };
 
-const blockDiscriminator = (block: ts.Block): string | undefined => {
+const structuralOrdinal = (node: ts.Node, parent: ts.Node, predicate: (candidate: ts.Node) => boolean): number => {
+  const siblings: ts.Node[] = [];
+  ts.forEachChild(parent, (child) => { if (predicate(child)) siblings.push(child); });
+  return Math.max(0, siblings.indexOf(node));
+};
+
+const normalizedSyntax = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const lexicalCallPath = (node: ts.Node, owner: ts.Node): string => {
+  const segments: number[] = [];
+  let current = node;
+  while (current !== owner && current.parent !== undefined) {
+    const parent = current.parent;
+    let index = 0;
+    let found = false;
+    ts.forEachChild(parent, (child) => {
+      if (child === current) found = true;
+      else if (!found) index += 1;
+    });
+    segments.unshift(index);
+    current = parent;
+  }
+  return segments.join('.');
+};
+
+const blockDiscriminator = (block: ts.Block, sourceFile: ts.SourceFile): string | undefined => {
   const parent = block.parent;
   if (ts.isFunctionLike(parent) && 'body' in parent && parent.body === block) return undefined;
-  if (ts.isIfStatement(parent)) return parent.thenStatement === block ? 'block:then' : 'block:else';
+  if (ts.isIfStatement(parent)) {
+    const arm = parent.thenStatement === block ? 'then' : 'else';
+    const ordinal = structuralOrdinal(parent, parent.parent, ts.isIfStatement);
+    return `if:${ordinal}:${sha256(normalizedSyntax(parent.expression.getText(sourceFile))).slice(0, 10)}:${arm}`;
+  }
+  if (ts.isIterationStatement(parent, false)) {
+    const kind = loopKind(parent);
+    const condition = conditionForLoop(parent)?.getText(sourceFile) ?? kind;
+    return `loop:${structuralOrdinal(parent, parent.parent, (candidate) => ts.isIterationStatement(candidate, false))}:${sha256(normalizedSyntax(condition)).slice(0, 10)}:${kind}`;
+  }
+  if (ts.isCatchClause(parent)) return `catch:${parent.variableDeclaration?.name.getText(sourceFile) ?? 'anonymous'}`;
+  if (ts.isCaseClause(parent) || ts.isDefaultClause(parent)) {
+    const clauseIndex = structuralOrdinal(parent, parent.parent, (candidate) => ts.isCaseClause(candidate) || ts.isDefaultClause(candidate));
+    return `case:${clauseIndex}:${ts.isCaseClause(parent) ? normalizedSyntax(parent.expression.getText(sourceFile)) : 'default'}`;
+  }
   const blocks: ts.Block[] = [];
   ts.forEachChild(parent, (child) => { if (ts.isBlock(child)) blocks.push(child); });
   const index = blocks.indexOf(block);
@@ -221,11 +260,22 @@ const qualifiedName = (node: ts.Node, name: string, sourceFile: ts.SourceFile): 
   while (current !== undefined) {
     let container: string | undefined;
     if (ts.isModuleDeclaration(current)) container = current.name.getText(sourceFile).replace(/^['"]|['"]$/g, '');
-    if ((ts.isClassDeclaration(current) || ts.isClassExpression(current)) && current.name !== undefined) container = current.name.text;
+    if (ts.isClassDeclaration(current) || ts.isClassExpression(current)) {
+      container = current.name?.text;
+      if (container === undefined) {
+        const owner = current.parent;
+        if (ts.isVariableDeclaration(owner) || ts.isPropertyDeclaration(owner) || ts.isPropertyAssignment(owner)) container = owner.name.getText(sourceFile);
+        else container = `anonymous-class:${structuralOrdinal(current, owner, (candidate) => ts.isClassExpression(candidate) || ts.isClassDeclaration(candidate))}`;
+      }
+    }
+    if (ts.isObjectLiteralExpression(current)) {
+      const owner = current.parent;
+      if (ts.isVariableDeclaration(owner) || ts.isPropertyDeclaration(owner) || ts.isPropertyAssignment(owner)) container = `object:${owner.name.getText(sourceFile)}`;
+    }
     if (ts.isFunctionDeclaration(current) || ts.isMethodDeclaration(current) || ts.isGetAccessorDeclaration(current) || ts.isSetAccessorDeclaration(current) || ts.isConstructorDeclaration(current) || ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
       container = declarationName(current, sourceFile)?.name;
     }
-    if (ts.isBlock(current)) container = blockDiscriminator(current);
+    if (ts.isBlock(current)) container = blockDiscriminator(current, sourceFile);
     const currentDeclaresNode = (ts.isVariableDeclaration(current) || ts.isPropertyDeclaration(current) || ts.isPropertyAssignment(current)) && current.initializer === node;
     if (!currentDeclaresNode && container !== undefined && containers[0] !== container) containers.unshift(container);
     current = current.parent;
@@ -262,7 +312,7 @@ const extractFragments = (
         const signatureHash = sha256(signatureText).slice(0, 24);
         const bodyText = 'body' in node && node.body !== undefined ? node.body.getText(file.compiler).replace(/\s+/g, ' ').trim() : '';
         const declarationFingerprint = sha256(`${symbolKindOf(node)}:${signatureHash}:${bodyText}`).slice(0, 24);
-        const idInput = `${projectLogicalId}:${file.model.projectRelativePath}:${qualified}:${signatureHash}:${declarationFingerprint}`;
+        const idInput = `v2:${projectLogicalId}:${file.model.projectRelativePath}:${qualified}:${signatureHash}:${declarationFingerprint}`;
         const fragment: FunctionFragment = {
           id: symbolId(`symbol:${sha256(idInput).slice(0, 24)}`),
           sourceFileId: file.model.id,
@@ -273,7 +323,7 @@ const extractFragments = (
           fullRange,
           definitionRange: named.range,
           ...(body === undefined ? {} : { bodyRange: body }),
-          identity: { recipeVersion: 1, signatureHash, declarationFingerprint },
+          identity: { recipeVersion: 2, signatureHash, declarationFingerprint },
           provenance: {
             source: 'adapter',
             projectRelativePath: file.model.projectRelativePath,
@@ -579,12 +629,13 @@ const extractRelations = (
             .sort((left, right) => (left.body.range.end - left.body.range.start) - (right.body.range.end - right.body.range.start))[0];
           const branchContext = nearestBranch(node, file.compiler);
           const kind = ts.isNewExpression(node) ? 'construct' : 'call';
-          const argumentCount = node.arguments?.length ?? 0;
-          const callFingerprint = sha256(`${kind}:${node.expression.getText(file.compiler)}:${argumentCount}`).slice(0, 24);
+          const callExpressionText = normalizedSyntax(node.getText(file.compiler));
+          const callFingerprint = sha256(`${kind}:${callExpressionText}`).slice(0, 24);
+          const lexicalPath = lexicalCallPath(node, owner.node);
           const occurrenceKey = `${owner.fragment.id}:${callFingerprint}`;
           const occurrence = occurrences.get(occurrenceKey) ?? 0;
           occurrences.set(occurrenceKey, occurrence + 1);
-          const idInput = `${projectLogicalId}:${owner.fragment.id}:${kind}:${callFingerprint}:${occurrence}`;
+          const idInput = `v2:${projectLogicalId}:${owner.fragment.id}:${kind}:${callFingerprint}:${lexicalPath}`;
           relations.push({
             id: relationId(`relation:${sha256(idInput).slice(0, 24)}`),
             projectId: projectId(projectLogicalId),
@@ -600,7 +651,7 @@ const extractRelations = (
               adapterVersion: typescriptAdapterManifest.adapterVersion,
               coreApiVersion: CORE_API_VERSION,
             },
-            identity: { recipeVersion: 1, callFingerprint, occurrence },
+            identity: { recipeVersion: 2, callFingerprint, callExpressionText, occurrence, lexicalPath },
           });
         }
       }
@@ -715,8 +766,14 @@ class TypeScriptSession implements AdapterSession {
     });
     await yieldToEventLoop();
     if (context.signal.aborted) return { status: 'cancelled', filesIndexed: 0, diagnostics };
-    const compilerFiles = program.getSourceFiles().filter((file) =>
-      !file.isDeclarationFile && isPathInside(this.rootPath, file.fileName) && (file.fileName.endsWith('.ts') || file.fileName.endsWith('.tsx')));
+    const canonicalSourceFiles = new Set<string>();
+    const compilerFiles = program.getSourceFiles().filter((file) => {
+      if (file.isDeclarationFile || !isPathInside(this.rootPath, file.fileName) || (!file.fileName.endsWith('.ts') && !file.fileName.endsWith('.tsx'))) return false;
+      const canonical = secureSystem.canonicalPath(file.fileName);
+      if (canonical === undefined || canonicalSourceFiles.has(canonical)) return false;
+      canonicalSourceFiles.add(canonical);
+      return true;
+    });
 
     const rawDiagnostics = [...parsed.errors, ...program.getConfigFileParsingDiagnostics(), ...program.getSyntacticDiagnostics(), ...program.getSemanticDiagnostics()];
     const rawErrorFiles = new Set(rawDiagnostics.filter((item) => item.category === ts.DiagnosticCategory.Error).map((item) => item.file?.fileName).filter((value): value is string => value !== undefined));

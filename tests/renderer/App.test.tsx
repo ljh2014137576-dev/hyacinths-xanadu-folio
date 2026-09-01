@@ -47,7 +47,7 @@ describe('App shell', () => {
     indexWorkspaceMock.mockResolvedValueOnce({ status: 'partial', snapshot: testSnapshot });
     render(<App />);
     await userEvent.click(screen.getByRole('button', { name: '选择本地 TypeScript 项目' }));
-    expect(await screen.findByText('部分索引 · 查看诊断')).toBeInTheDocument();
+    expect(await screen.findByText('部分索引预览 · 用户资产不保存')).toBeInTheDocument();
   });
 
   it('persists migration evidence before acknowledging the relocation journal', async () => {
@@ -62,6 +62,18 @@ describe('App shell', () => {
     expect(saveUserStateMock).toHaveBeenCalled();
     const request = saveUserStateMock.mock.calls.at(-1)?.[0];
     expect(request?.acknowledgeRelocationJournal).toBe('journal-1');
-    expect(request?.state.pendingMigrations).toHaveLength(1);
+    expect(request?.state.pendingMigrations ?? []).toHaveLength(0);
+  });
+
+  it('keeps partial generations transient and does not migrate or save user assets', async () => {
+    indexWorkspaceMock.mockResolvedValueOnce({
+      status: 'partial', snapshot: testSnapshot, relocationJournalId: 'should-not-be-used',
+      relocation: [{ status: 'matched', previousId: 'symbol:old', currentId: 'symbol:new', certainty: 'probable', evidence: ['partial'] }],
+      relationRelocation: [],
+    });
+    render(<App />);
+    await userEvent.click(screen.getByRole('button', { name: '选择本地 TypeScript 项目' }));
+    expect(await screen.findByText('部分索引预览 · 用户资产不保存')).toBeInTheDocument();
+    expect(saveUserStateMock).not.toHaveBeenCalled();
   });
 });

@@ -205,7 +205,10 @@ const installIpcHandlers = (): void => {
     const result = await runUtilityIndex(workspace.rootPath, parsed.requestId, (progress) => {
       event.sender.send(IPC_CHANNELS.indexProgress, { requestId: parsed.requestId, progress });
     });
-    if (result.status === 'completed' || result.status === 'partial') {
+    if (result.status === 'partial') {
+      return result;
+    }
+    if (result.status === 'completed') {
       const relocation = pendingJournal?.symbolRelocation ?? (previousCache === undefined ? [] : relocateFunctionFragments(previousCache.fragments, result.snapshot.fragments));
       const relationRelocation = pendingJournal?.relationRelocation ?? (previousCache === undefined ? [] : relocateRelationBridges(
         previousCache.relations,

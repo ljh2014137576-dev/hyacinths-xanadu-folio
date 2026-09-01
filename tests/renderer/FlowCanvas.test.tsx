@@ -31,6 +31,7 @@ describe('FlowCanvas bridge lifecycle and certainty', () => {
         <FlowCanvas
           snapshot={snapshot}
           businessNodes={[]}
+          staleAssets={[]}
           page={page}
           relationStates={{}}
           onSelectRelation={() => undefined}

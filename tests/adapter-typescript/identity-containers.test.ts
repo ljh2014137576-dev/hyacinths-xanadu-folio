@@ -53,4 +53,32 @@ export function duplicate(value: number): number { return value + 1; }
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.message).toContain('collision');
   });
+
+  it('distinguishes repeated statement scopes, switch/catch/loop blocks, anonymous classes and object owners', async () => {
+    const root = await createProject(`
+export function scopes(flag: boolean) {
+  if (flag) { const helper = (value: number) => value + 1; helper(1); }
+  if (flag) { const helper = (value: number) => value + 1; helper(2); }
+  switch (flag ? 1 : 2) { case 1: { const helper = (value: number) => value + 1; helper(3); } break; default: { const helper = (value: number) => value + 1; helper(4); } }
+  try { throw new Error(); } catch (error) { const helper = (value: number) => value + 1; helper(5); }
+  loop: for (let index = 0; index < 1; index++) { const helper = (value: number) => value + 1; if (helper(index) > 0) continue loop; }
+  const first = class { run(value: number) { return value + 1; } };
+  const second = class { run(value: number) { return value + 1; } };
+  const objectA = { run: (value: number) => value + 1 };
+  const objectB = { run: (value: number) => value + 1 };
+  return first.run(1) + second.run(1) + objectA.run(1) + objectB.run(1);
+}
+`);
+    const result = await indexTypeScriptProjectOperation(root);
+    expect(['completed', 'partial']).toContain(result.status);
+    if (result.status !== 'completed' && result.status !== 'partial') throw new Error('scope project failed');
+    const ids = result.snapshot.fragments.map((fragment) => fragment.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const helpers = result.snapshot.fragments.filter((fragment) => fragment.displayName === 'helper');
+    expect(helpers).toHaveLength(6);
+    expect(new Set(helpers.map((fragment) => fragment.qualifiedName)).size).toBe(6);
+    const runs = result.snapshot.fragments.filter((fragment) => fragment.displayName === 'run');
+    expect(runs).toHaveLength(4);
+    expect(new Set(runs.map((fragment) => fragment.qualifiedName)).size).toBe(4);
+  });
 });

@@ -60,6 +60,10 @@ export class SecureTypeScriptSystem {
     return this.projectFiles.map((file) => normalize(relative(this.rootPath, file)));
   }
 
+  canonicalPath(path: string): string | undefined {
+    return this.validate(path, false);
+  }
+
   private record(code: WorkspacePathViolation['code'], candidate: string): void {
     const key = `${code}:${candidate}`;
     if (this.violationKeys.has(key)) return;
@@ -151,7 +155,7 @@ export class SecureTypeScriptSystem {
         }
       }
     }
-    this.projectFiles = files;
+    this.projectFiles = files.sort((left, right) => normalize(relative(this.rootPath, left)).localeCompare(normalize(relative(this.rootPath, right))));
     this.prepared = true;
     onProgress(files.length);
   }
@@ -186,9 +190,10 @@ export class SecureTypeScriptSystem {
     const directory = this.validate(directoryName, false);
     if (directory === undefined || !existsSync(directory) || !statSync(directory).isDirectory()) return [];
     return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-      if (!entry.isDirectory() || entry.isSymbolicLink()) return [];
-      const candidate = this.validate(resolve(directory, entry.name), false);
-      return candidate === undefined ? [] : [candidate];
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) return [];
+      const logicalCandidate = resolve(directory, entry.name);
+      const candidate = this.validate(logicalCandidate, false);
+      return candidate === undefined ? [] : [logicalCandidate];
     });
   };
 
@@ -209,21 +214,32 @@ export class SecureTypeScriptSystem {
     const safeExcludes = (excludes ?? []).filter((pattern) => safePattern(root, pattern, this.rootPath));
     const includePatterns = safeIncludes.map((pattern) => typeScriptWildcardPattern(this.expandDirectoryPattern(root, pattern)));
     const excludePatterns = safeExcludes.map((pattern) => typeScriptWildcardPattern(this.expandDirectoryPattern(root, pattern)));
-    return this.projectFiles.filter((file) => {
+    const matchOptions = {
+      dot: false,
+      nocase: !ts.sys.useCaseSensitiveFileNames,
+      nobrace: true,
+      noext: true,
+      nonegate: true,
+      nocomment: true,
+    } as const;
+    const selected = this.projectFiles.filter((file) => {
       if (!isContained(root, file)) return false;
       if (extensions.length > 0 && !extensions.includes(extname(file))) return false;
       const pathFromRoot = normalize(relative(root, file));
       if (depth !== undefined && pathFromRoot.split('/').length - 1 > depth) return false;
-      const matchOptions = {
-        dot: false,
-        nocase: !ts.sys.useCaseSensitiveFileNames,
-        nobrace: true,
-        noext: true,
-        nonegate: true,
-        nocomment: true,
-      } as const;
-      if (!includePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions))) return false;
-      return !excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
+      return includePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions));
+    });
+    const excludedCanonical = new Set(this.projectFiles.flatMap((file) => {
+      const pathFromRoot = normalize(relative(root, file));
+      const canonical = this.canonicalPath(file);
+      return excludePatterns.some((pattern) => minimatch(pathFromRoot, pattern, matchOptions)) && canonical !== undefined ? [canonical] : [];
+    }));
+    const canonicalOwners = new Set<string>();
+    return selected.filter((file) => {
+      const canonical = this.canonicalPath(file);
+      if (canonical === undefined || excludedCanonical.has(canonical) || canonicalOwners.has(canonical)) return false;
+      canonicalOwners.add(canonical);
+      return true;
     });
   };
 

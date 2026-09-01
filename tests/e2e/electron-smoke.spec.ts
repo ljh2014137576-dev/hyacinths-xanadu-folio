@@ -3,14 +3,16 @@ import { resolve } from 'node:path';
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
 
 const repositoryRoot = resolve('.');
-const fixtureRoot = resolve('fixtures/order-service');
+const fixtureRoot = resolve('.tmp/e2e-order-service');
+const sourceFixtureRoot = resolve('fixtures/order-service');
 const userDataRoot = resolve('.tmp/e2e-userdata');
+const partialUserDataRoot = resolve('.tmp/e2e-partial-userdata');
 
-const launch = async (): Promise<{ readonly app: ElectronApplication; readonly page: Page }> => {
+const launch = async (workspace = fixtureRoot, userData = userDataRoot): Promise<{ readonly app: ElectronApplication; readonly page: Page }> => {
   const app = await electron.launch({
     args: ['.', ...(process.platform === 'linux' ? ['--no-sandbox'] : [])],
     cwd: repositoryRoot,
-    env: { ...process.env, XANADU_DEMO_WORKSPACE: fixtureRoot, XANADU_USER_DATA: userDataRoot },
+    env: { ...process.env, XANADU_DEMO_WORKSPACE: workspace, XANADU_USER_DATA: userData },
   });
   return { app, page: await app.firstWindow() };
 };
@@ -22,6 +24,8 @@ const selectFixture = async (page: Page): Promise<void> => {
 
 test('indexes, reads, organizes, switches modes and restores the MVP workspace', async () => {
   await fs.rm(userDataRoot, { recursive: true, force: true });
+  await fs.rm(fixtureRoot, { recursive: true, force: true });
+  await fs.cp(sourceFixtureRoot, fixtureRoot, { recursive: true, filter: (source) => !source.endsWith('broken.ts') });
   let running = await launch();
   const invalidHandleRejected = await running.page.evaluate(async () => {
     try {
@@ -93,5 +97,20 @@ test('indexes, reads, organizes, switches modes and restores the MVP workspace',
   await running.page.locator('.recent-pages button').filter({ hasText: /^createOrder$/ }).click();
   await expect(running.page.getByLabel('分支查看')).toHaveValue('A');
   await expect(running.page.locator('.loop-region > button').first()).toHaveAttribute('aria-expanded', 'false');
+  await running.app.close();
+});
+
+test('keeps partial index generations transient and read-only', async () => {
+  await fs.rm(partialUserDataRoot, { recursive: true, force: true });
+  let running = await launch(sourceFixtureRoot, partialUserDataRoot);
+  await selectFixture(running.page);
+  await expect(running.page.getByText('部分索引预览 · 用户资产不保存')).toBeVisible();
+  await running.page.getByLabel('搜索文件、函数、方法或业务节点').fill('createOrder');
+  await running.page.getByLabel('选择 createOrder').check();
+  await expect(running.page.getByRole('button', { name: /创建业务节点 · 1/ })).toBeDisabled();
+  await running.app.close();
+  running = await launch(sourceFixtureRoot, partialUserDataRoot);
+  await selectFixture(running.page);
+  await expect(running.page.getByText('选择入口函数，创建 FlowPage')).toBeVisible();
   await running.app.close();
 });

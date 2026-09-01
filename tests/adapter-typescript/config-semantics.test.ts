@@ -75,6 +75,25 @@ describe('TypeScript-compatible config enumeration', () => {
     expect(snapshot.diagnostics.some((diagnostic) => diagnostic.code === 'WORKSPACE_SYMLINK_ESCAPE')).toBe(true);
   });
 
+  it('matches TypeScript alias ownership and emits one physical SourceFile', async () => {
+    const root = await createWorkspace({ compilerOptions: { noEmit: true, types: [] } });
+    await fs.mkdir(join(root, 'real'));
+    await fs.writeFile(join(root, 'real', 'linked.ts'), 'export function linkedFunction() { return 1; }\n', 'utf8');
+    await fs.symlink(join(root, 'real'), join(root, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+    const system = new SecureTypeScriptSystem(root);
+    await system.prepareProjectFileIndex(new AbortController().signal);
+    const relativeNames = (names: readonly string[]) => names.map((file) => file.slice(root.length + 1).replaceAll('\\', '/')).sort();
+    const parse = (config: object) => relativeNames(ts.parseJsonConfigFileContent(config, system.createParseConfigHost(), root, undefined, join(root, 'tsconfig.json')).fileNames);
+    const official = (config: object) => relativeNames(ts.parseJsonConfigFileContent(config, ts.sys, root, undefined, join(root, 'tsconfig.json')).fileNames);
+    for (const config of [{}, { include: ['real'] }, { include: ['linked'] }, { include: ['real', 'linked'] }, { include: ['real', 'linked'], exclude: ['linked'] }]) expect(parse(config), JSON.stringify({ config, secured: parse(config), official: official(config) })).toEqual(official(config));
+    expect(parse({ include: ['real', 'linked'] })).toHaveLength(1);
+    expect(parse({ include: ['real', 'linked'], exclude: ['linked'] })).toEqual(official({ include: ['real', 'linked'], exclude: ['linked'] }));
+    const snapshot = await snapshotFrom(root);
+    expect(snapshot.sourceFiles.filter((file) => file.projectRelativePath.includes('linked.ts'))).toHaveLength(1);
+    expect(snapshot.fragments.filter((fragment) => fragment.displayName === 'linkedFunction')).toHaveLength(1);
+    expect(new Set(snapshot.fragments.map((fragment) => fragment.id)).size).toBe(snapshot.fragments.length);
+  });
+
   it('indexes the current repository directory includes with non-empty business symbols', async () => {
     const result = await indexTypeScriptProjectOperation(resolve('.'));
     expect(result.status).toBe('completed');

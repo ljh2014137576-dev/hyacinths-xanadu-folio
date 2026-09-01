@@ -39,16 +39,22 @@ export const relocateRelationBridges = (
     const expectedSource = symbolMap.get(oldRelation.sourceFragmentId) ?? oldRelation.sourceFragmentId;
     const oldIdentity = (oldRelation as RelationBridge & { readonly identity?: RelationBridge['identity'] }).identity;
     const oldCallText = previousContents[oldRelation.callSite.sourceFileId]?.slice(oldRelation.callSite.range.start, oldRelation.callSite.range.end);
-    const candidates = current.filter((candidate) => {
+    const fingerprintCandidates = current.filter((candidate) => {
       if (candidate.sourceFragmentId !== expectedSource || candidate.kind !== oldRelation.kind) return false;
       if (oldIdentity !== undefined) {
-        return candidate.identity.callFingerprint === oldIdentity.callFingerprint && candidate.identity.occurrence === oldIdentity.occurrence;
+        return candidate.identity.callFingerprint === oldIdentity.callFingerprint;
       }
       const currentCallText = currentContents[candidate.callSite.sourceFileId]?.slice(candidate.callSite.range.start, candidate.callSite.range.end);
       return oldCallText !== undefined && currentCallText === oldCallText;
     });
+    const structuralCandidates = oldIdentity?.recipeVersion === 2 && oldIdentity.lexicalPath !== undefined
+      ? fingerprintCandidates.filter((candidate) => candidate.identity.recipeVersion === 2 && candidate.identity.lexicalPath === oldIdentity.lexicalPath)
+      : fingerprintCandidates;
+    const candidates = oldIdentity?.recipeVersion === 2 && fingerprintCandidates.length > 1
+      ? fingerprintCandidates
+      : structuralCandidates.length > 0 ? structuralCandidates : fingerprintCandidates;
     if (candidates.length === 1 && candidates[0] !== undefined) {
-      return { status: 'matched', previousId: oldRelation.id, currentId: candidates[0].id, certainty: 'probable', evidence: ['migrated source, call fingerprint, kind, and occurrence matched'] };
+      return { status: 'matched', previousId: oldRelation.id, currentId: candidates[0].id, certainty: 'probable', evidence: ['migrated source, kind, full call fingerprint, and lexical path matched'] };
     }
     if (candidates.length > 1) {
       return { status: 'ambiguous', previousId: oldRelation.id, candidates: candidates.map((candidate) => candidate.id), evidence: ['multiple relation fingerprint candidates'] };

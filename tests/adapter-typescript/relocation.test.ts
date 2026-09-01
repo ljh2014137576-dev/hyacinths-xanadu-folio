@@ -133,4 +133,32 @@ export function renamedB(value: number): number { return value + 1; }
     expect(afterUnrelated.flowPages[0]?.expandedRelations).toEqual(state.flowPages[0]?.expandedRelations);
     expect(afterUnrelated.flowPages[0]?.placements.map((placement) => placement.targetId)).toEqual(state.flowPages[0]?.placements.map((placement) => placement.targetId));
   });
+
+  it('maps distinct full call arguments after insertion and marks identical repeats ambiguous', async () => {
+    const root = await workspace();
+    await fs.writeFile(join(root, 'src', 'target.ts'), 'export function target(value: number): number { return value; }\n', 'utf8');
+    await fs.writeFile(join(root, 'src', 'root.ts'), "import { target } from './target.js';\nexport function entry(): number { return target(1) + target(2); }\n", 'utf8');
+    const first = await indexTypeScriptProject(root);
+    const entry = first.fragments.find((fragment) => fragment.displayName === 'entry');
+    if (entry === undefined) throw new Error('entry missing');
+    const firstRelations = first.relations.filter((relation) => relation.sourceFragmentId === entry.id);
+    await fs.writeFile(join(root, 'src', 'root.ts'), "import { target } from './target.js';\nexport function entry(): number { return target(0) + target(1) + target(2); }\n", 'utf8');
+    const second = await indexTypeScriptProject(root);
+    const symbolMatches = relocateFunctionFragments(first.fragments, second.fragments);
+    const relationMatches = relocateRelationBridges(first.relations, second.relations, symbolMatches, first.sourceContents, second.sourceContents);
+    for (const oldRelation of firstRelations) {
+      const match = relationMatches.find((candidate) => candidate.previousId === oldRelation.id);
+      expect(match?.status).toBe('matched');
+      if (match?.status !== 'matched') continue;
+      const nextRelation = second.relations.find((relation) => relation.id === match.currentId);
+      expect(nextRelation?.identity.callExpressionText).toMatch(/target\([12]\)/);
+    }
+
+    await fs.writeFile(join(root, 'src', 'root.ts'), "import { target } from './target.js';\nexport function entry(): number { return target(1) + target(1); }\n", 'utf8');
+    const repeated = await indexTypeScriptProject(root);
+    const repeatedEntry = repeated.fragments.find((fragment) => fragment.displayName === 'entry');
+    if (repeatedEntry === undefined) throw new Error('repeated entry missing');
+    const repeats = relocateRelationBridges(first.relations.filter((relation) => relation.sourceFragmentId === entry.id), repeated.relations.filter((relation) => relation.sourceFragmentId === repeatedEntry.id), relocateFunctionFragments(first.fragments, repeated.fragments), first.sourceContents, repeated.sourceContents);
+    expect(repeats.filter((match) => match.status === 'ambiguous').length).toBeGreaterThan(0);
+  });
 });

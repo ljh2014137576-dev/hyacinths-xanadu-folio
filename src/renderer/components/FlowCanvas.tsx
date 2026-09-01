@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AdapterIndexSnapshot } from '../../adapter-api/index.js';
 import { measureBridge, type BridgeGeometry, type RectLike } from '../../bridge-renderer/geometry.js';
-import { formatIterationEstimate, type BusinessNode, type FlowPage, type FunctionFragment, type RelationBridge } from '../../model/index.js';
+import { formatIterationEstimate, type BusinessNode, type FlowPage, type FunctionFragment, type RelationBridge, type StaleAsset } from '../../model/index.js';
 
 interface FlowCanvasProps {
   readonly snapshot: AdapterIndexSnapshot;
   readonly businessNodes: readonly BusinessNode[];
+  readonly staleAssets: readonly StaleAsset[];
   readonly page: FlowPage;
   readonly relationStates: Readonly<Record<string, 'visible' | 'dimmed' | 'collapsed'>>;
   readonly selectedRelationId?: string;
@@ -248,12 +249,15 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
                   return (
                     <article className="source-card business-flow-card" data-business-node-id={node.id} key={placement.id}>
                       <header><button type="button" onClick={() => props.onToggleBusinessPlacement(placement.id)}><strong>◇ {node.name}</strong><span>{node.provenance.definitionPath}</span></button><small>{placement.collapsed ? 'EXPAND' : 'COLLAPSE'}</small></header>
-                      {!placement.collapsed && <div className="business-flow-members"><p>{node.description}</p><dl><div><dt>定义来源</dt><dd>{node.provenance.definitionPath}</dd></div><div><dt>创建者</dt><dd>{node.provenance.createdBy}</dd></div><div><dt>更新时间</dt><dd>{node.provenance.updatedAt}</dd></div></dl>{node.members.slice().sort((left, right) => left.order - right.order).map((member) => { const fragment = props.snapshot.fragments.find((item) => item.id === member.fragmentId); return fragment === undefined ? null : <div key={member.fragmentId}><strong>{member.order + 1}. {fragment.displayName}</strong><span>{fragment.provenance.projectRelativePath}</span><code>[{fragment.fullRange.start}, {fragment.fullRange.end})</code></div>; })}</div>}
+                      {!placement.collapsed && <div className="business-flow-members"><p>{node.description}</p><dl><div><dt>定义来源</dt><dd>{node.provenance.definitionPath}</dd></div><div><dt>创建者</dt><dd>{node.provenance.createdBy}</dd></div><div><dt>更新时间</dt><dd>{node.provenance.updatedAt}</dd></div></dl>{node.members.slice().sort((left, right) => left.order - right.order).map((member) => { const fragment = props.snapshot.fragments.find((item) => item.id === member.fragmentId); const stale = props.staleAssets.find((asset) => asset.kind === 'symbol' && asset.previousId === member.fragmentId); return fragment === undefined ? stale === undefined ? null : <div className="stale-member" key={member.fragmentId}><strong>{member.order + 1}. stale member</strong><span>{stale.previousId}</span><code>{stale.evidence.join(' · ')}</code></div> : <div key={member.fragmentId}><strong>{member.order + 1}. {fragment.displayName}</strong><span>{fragment.provenance.projectRelativePath}</span><code>[{fragment.fullRange.start}, {fragment.fullRange.end})</code></div>; })}</div>}
                     </article>
                   );
                 }
                 const fragment = placementFragments.get(placement.id);
-                if (fragment === undefined) return null;
+                if (fragment === undefined) {
+                  const stale = props.staleAssets.find((asset) => asset.kind === 'symbol' && asset.previousId === placement.targetId);
+                  return stale === undefined ? null : <article className="stale-card" key={placement.id}><strong>⚠ stale symbol</strong><code>{stale.previousId}</code><p>{stale.evidence.join(' · ')}</p></article>;
+                }
                 if (placement.kind === 'cycle') {
                   return <div className="cycle-card" key={placement.id}>↩ 调用环回连 · {fragment.displayName}</div>;
                 }
@@ -329,6 +333,7 @@ export function FlowCanvas(props: FlowCanvasProps): React.JSX.Element {
                   </article>
                 );
               })}
+              {depth === 0 && props.staleAssets.filter((asset) => asset.kind === 'relation').map((stale) => <div className="stale-relation-card" key={stale.id}><strong>⚠ stale relation · {stale.previousId}</strong><span>{stale.evidence.join(' · ')}</span></div>)}
             </div>
           ))}
         </div>

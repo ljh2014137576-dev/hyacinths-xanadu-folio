@@ -3,10 +3,13 @@ import { resolve } from 'node:path';
 import { _electron as electron } from '@playwright/test';
 
 const repositoryRoot = resolve('.');
-const fixtureRoot = resolve('fixtures/order-service');
+const fixtureRoot = resolve('.tmp/screenshot-order-service');
+const sourceFixtureRoot = resolve('fixtures/order-service');
 const userDataRoot = resolve('.tmp/screenshot-userdata');
 const outputDirectory = resolve('docs/screenshots');
 await fs.rm(userDataRoot, { recursive: true, force: true });
+await fs.rm(fixtureRoot, { recursive: true, force: true });
+await fs.cp(sourceFixtureRoot, fixtureRoot, { recursive: true, filter: (source) => !source.endsWith('broken.ts') });
 await fs.mkdir(outputDirectory, { recursive: true });
 
 const app = await electron.launch({

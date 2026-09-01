@@ -69,7 +69,7 @@ export interface FunctionFragment {
   readonly definitionRange: TextRange;
   readonly bodyRange?: TextRange;
   readonly identity: {
-    readonly recipeVersion: 1;
+    readonly recipeVersion: 1 | 2;
     readonly signatureHash: string;
     readonly declarationFingerprint: string;
   };
@@ -146,9 +146,11 @@ export interface RelationBridge {
   readonly evidence: readonly ResolutionEvidence[];
   readonly adapter: AdapterProvenance;
   readonly identity: {
-    readonly recipeVersion: 1;
+    readonly recipeVersion: 1 | 2;
     readonly callFingerprint: string;
+    readonly callExpressionText?: string;
     readonly occurrence: number;
+    readonly lexicalPath?: string;
   };
 }
 
@@ -271,6 +273,7 @@ export interface UserWorkspaceState {
   readonly businessNodes: readonly BusinessNode[];
   readonly recentFlowPageIds: readonly FlowPageId[];
   readonly pendingMigrations?: readonly PendingAssetMigration[];
+  readonly staleAssets?: readonly StaleAsset[];
 }
 
 export interface PendingAssetMigration {
@@ -281,6 +284,15 @@ export interface PendingAssetMigration {
   readonly candidates: readonly string[];
   readonly evidence: readonly string[];
   readonly createdAt: string;
+}
+
+export interface StaleAsset {
+  readonly id: string;
+  readonly kind: 'symbol' | 'relation';
+  readonly previousId: string;
+  readonly provenance: 'previous-index';
+  readonly evidence: readonly string[];
+  readonly keptAt: string;
 }
 
 const rangeSchema = z.object({
@@ -371,6 +383,14 @@ export const userWorkspaceStateSchema = z.object({
     candidates: z.array(z.string().min(1)),
     evidence: z.array(z.string().min(1)),
     createdAt: z.string().datetime(),
+  })).optional(),
+  staleAssets: z.array(z.object({
+    id: z.string().min(1),
+    kind: z.enum(['symbol', 'relation']),
+    previousId: z.string().min(1),
+    provenance: z.literal('previous-index'),
+    evidence: z.array(z.string().min(1)),
+    keptAt: z.string().datetime(),
   })).optional(),
 });
 

@@ -3,6 +3,7 @@ import {
   flowPageId,
   relationId,
   symbolId,
+  parseUserWorkspaceState,
   type BranchViewFilter,
   type BusinessNode,
   type FlowPage,
@@ -10,6 +11,7 @@ import {
   type RelationBridge,
   type RelationId,
   type SymbolId,
+  type PendingAssetMigration,
   type UserWorkspaceState,
 } from '../model/index.js';
 
@@ -256,9 +258,20 @@ export const migrateUserAssets = (
   const relationReplacements = new Map(relationRelocation.flatMap((match) => match.status === 'matched' ? [[match.previousId, match.currentId] as const] : []));
   const replaceSymbol = (id: string): string => symbolReplacements.get(id) ?? id;
   const replaceRelation = (id: string): string => relationReplacements.get(id) ?? id;
-  const unresolvedSymbols = symbolRelocation.filter((match) => match.status !== 'matched');
-  const unresolvedRelations = relationRelocation.filter((match) => match.status !== 'matched');
-  const pending = [...unresolvedSymbols.map((match) => ({ match, kind: 'symbol' as const })), ...unresolvedRelations.map((match) => ({ match, kind: 'relation' as const }))]
+  const referencedSymbols = new Set<string>([
+    ...state.flowPages.flatMap((page) => page.entry.kind === 'function' ? [page.entry.id] : []),
+    ...state.flowPages.flatMap((page) => page.placements.filter((placement) => placement.kind !== 'business-node').map((placement) => placement.targetId)),
+    ...state.businessNodes.flatMap((node) => node.members.map((member) => member.fragmentId)),
+  ]);
+  const referencedRelations = new Set<string>([
+    ...state.flowPages.flatMap((page) => page.expandedRelations),
+    ...state.flowPages.flatMap((page) => page.selectedRelationId === undefined ? [] : [page.selectedRelationId]),
+    ...state.flowPages.flatMap((page) => page.placements.flatMap((placement) => placement.viaRelationId === undefined ? [] : [placement.viaRelationId])),
+  ]);
+  const unresolved = (match: RelocationMatch): match is Exclude<RelocationMatch, { readonly status: 'matched' }> => match.status !== 'matched';
+  const unresolvedSymbols = symbolRelocation.filter((match): match is Exclude<RelocationMatch, { readonly status: 'matched' }> => unresolved(match) && referencedSymbols.has(match.previousId));
+  const unresolvedRelations = relationRelocation.filter((match): match is Exclude<RelocationMatch, { readonly status: 'matched' }> => unresolved(match) && referencedRelations.has(match.previousId));
+  const pending: PendingAssetMigration[] = [...unresolvedSymbols.map((match) => ({ match, kind: 'symbol' as const })), ...unresolvedRelations.map((match) => ({ match, kind: 'relation' as const }))]
     .map(({ match, kind }) => ({
       id: `migration:${kind}:${match.previousId}`,
       kind,
@@ -310,25 +323,57 @@ export const resolvePendingMigration = (
   state: UserWorkspaceState,
   migrationId: string,
   action: { readonly kind: 'confirm'; readonly candidateId: string } | { readonly kind: 'keep-stale' } | { readonly kind: 'remove' },
+  available?: { readonly symbolIds: ReadonlySet<string>; readonly relationIds: ReadonlySet<string> },
 ): UserWorkspaceState => {
   const migration = state.pendingMigrations?.find((item) => item.id === migrationId);
   if (migration === undefined) return state;
+  if (action.kind === 'confirm' && (!migration.candidates.includes(action.candidateId) ||
+    (migration.kind === 'symbol' ? !(available?.symbolIds.has(action.candidateId) ?? false) : !(available?.relationIds.has(action.candidateId) ?? false)))) return state;
   let next = state;
   if (action.kind === 'confirm') {
     const synthetic: RelocationMatch = { status: 'matched', previousId: migration.previousId, currentId: action.candidateId, certainty: 'probable', evidence: ['user confirmed migration candidate'] };
     next = migrateUserAssets(state, migration.kind === 'symbol' ? [synthetic] : [], migration.kind === 'relation' ? [synthetic] : []).state;
+  } else if (action.kind === 'keep-stale') {
+    next = {
+      ...state,
+      staleAssets: [...(state.staleAssets ?? []), {
+        id: `stale:${migration.kind}:${migration.previousId}`,
+        kind: migration.kind,
+        previousId: migration.previousId,
+        provenance: 'previous-index',
+        evidence: migration.evidence,
+        keptAt: new Date().toISOString(),
+      }],
+    };
   } else if (action.kind === 'remove') {
+    const affectedBusinessNodes = migration.kind === 'symbol'
+      ? state.businessNodes.filter((node) => node.members.some((member) => member.fragmentId === migration.previousId))
+      : [];
+    const removedBusinessNodeIds = new Set<string>(affectedBusinessNodes.filter((node) => node.members.length === 1).map((node) => node.id));
+    const removedPageIds = new Set(state.flowPages.filter((page) => page.entry.kind === 'business-node' && removedBusinessNodeIds.has(page.entry.id)).map((page) => page.id));
     next = {
       ...state,
       flowPages: state.flowPages
-        .filter((page) => !(migration.kind === 'symbol' && page.entry.kind === 'function' && page.entry.id === migration.previousId))
-        .map((page) => ({
+        .filter((page) => !removedPageIds.has(page.id) && !(migration.kind === 'symbol' && page.entry.kind === 'function' && page.entry.id === migration.previousId))
+        .map((page) => {
+          const updated = {
           ...page,
-          placements: page.placements.filter((placement) => migration.kind === 'symbol' ? placement.targetId !== migration.previousId : placement.viaRelationId !== migration.previousId),
+          placements: page.placements.filter((placement) => migration.kind === 'symbol'
+            ? placement.targetId !== migration.previousId && !(placement.cycleTargetPlacementId?.endsWith(migration.previousId) ?? false)
+            : placement.viaRelationId !== migration.previousId),
           expandedRelations: migration.kind === 'relation' ? page.expandedRelations.filter((id) => id !== migration.previousId) : page.expandedRelations,
-        })),
-      businessNodes: state.businessNodes.map((node) => ({ ...node, members: migration.kind === 'symbol' ? node.members.filter((member) => member.fragmentId !== migration.previousId) : node.members })),
+          };
+          if (migration.kind === 'relation' && page.selectedRelationId === migration.previousId) {
+            const withoutSelection = Object.fromEntries(Object.entries(updated).filter(([key]) => key !== 'selectedRelationId')) as unknown as FlowPage;
+            return withoutSelection;
+          }
+          return updated;
+        }),
+      recentFlowPageIds: state.recentFlowPageIds.filter((id) => !removedPageIds.has(id)),
+      businessNodes: state.businessNodes
+        .filter((node) => !removedBusinessNodeIds.has(node.id))
+        .map((node) => ({ ...node, members: migration.kind === 'symbol' ? node.members.filter((member) => member.fragmentId !== migration.previousId) : node.members })),
     };
   }
-  return { ...next, pendingMigrations: next.pendingMigrations?.filter((item) => item.id !== migrationId) ?? [] };
+  return parseUserWorkspaceState({ ...next, pendingMigrations: next.pendingMigrations?.filter((item) => item.id !== migrationId) ?? [] });
 };

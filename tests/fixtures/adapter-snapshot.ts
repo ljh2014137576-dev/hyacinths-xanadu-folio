@@ -73,7 +73,7 @@ const relation = (id: string, call: string, targetId: typeof createId, arm: 'A' 
     branchContext: { branchId: 'branch:paid', condition: 'order.paid', arm, label: arm === 'A' ? 'order.paid = true' : 'order.paid = false' },
     evidence: [{ kind: 'type-checker', detail: target.displayName }],
     adapter: { adapterId: 'xanadu.typescript', adapterVersion: '0.1.0', coreApiVersion: '1.0.0' },
-    identity: { recipeVersion: 1, callFingerprint: `call:${call}`, occurrence: 0 },
+    identity: { recipeVersion: 1, callFingerprint: `call:${call}`, callExpressionText: `${call}()`, occurrence: 0 },
   };
 };
 

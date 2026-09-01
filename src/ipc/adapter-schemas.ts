@@ -45,7 +45,7 @@ const fragmentSchema = z.object({
   definitionRange: rangeSchema,
   bodyRange: rangeSchema.optional(),
   identity: z.object({
-    recipeVersion: z.literal(1),
+    recipeVersion: z.union([z.literal(1), z.literal(2)]),
     signatureHash: idSchema,
     declarationFingerprint: idSchema,
   }),
@@ -70,7 +70,7 @@ const relationSchema = z.object({
   loopRegionId: idSchema.optional(),
   evidence: z.array(z.object({ kind: z.enum(['type-checker', 'alias', 'call-signature', 'manual', 'revision']), detail: z.string() })),
   adapter: adapterProvenanceSchema,
-  identity: z.object({ recipeVersion: z.literal(1), callFingerprint: idSchema, occurrence: z.number().int().nonnegative() }),
+  identity: z.object({ recipeVersion: z.union([z.literal(1), z.literal(2)]), callFingerprint: idSchema, callExpressionText: z.string().optional(), occurrence: z.number().int().nonnegative(), lexicalPath: z.string().optional() }),
 });
 const controlEdgeSchema = z.object({ id: idSchema, kind: z.enum(['entry', 'back', 'continue']), source: anchorSchema, target: anchorSchema });
 const exitEdgeSchema = z.object({ id: idSchema, reason: z.enum(['condition-false', 'break', 'return', 'throw', 'normal-function-exit']), source: anchorSchema, target: anchorSchema.optional() });

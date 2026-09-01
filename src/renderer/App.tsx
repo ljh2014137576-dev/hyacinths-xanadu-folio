@@ -50,6 +50,14 @@ export function App(): React.JSX.Element {
         return;
       }
       if (indexResult.status === 'failed') throw new Error(indexResult.message);
+      if (indexResult.status === 'partial') {
+        setSnapshot(indexResult.snapshot);
+        setIndexStatus('partial');
+        setUserState(restored);
+        setRelocationWarnings(restored.pendingMigrations?.length ?? 0);
+        setProgress({ phase: 'persist', completed: indexResult.snapshot.sourceFiles.length, total: indexResult.snapshot.sourceFiles.length, message: '部分索引预览；用户资产等待完整索引' });
+        return;
+      }
       const relocation = indexResult.relocation ?? [];
       const relationRelocation = indexResult.relationRelocation ?? [];
       const migration = migrateUserAssets(restored, relocation, relationRelocation);
@@ -71,7 +79,7 @@ export function App(): React.JSX.Element {
         phase: 'persist',
         completed: indexResult.snapshot.sourceFiles.length,
         total: indexResult.snapshot.sourceFiles.length,
-        message: indexResult.status === 'partial' ? '部分索引完成，请查看诊断' : '索引完成',
+        message: '索引完成',
       });
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : '项目索引失败，请检查 TypeScript 配置。');
@@ -92,6 +100,7 @@ export function App(): React.JSX.Element {
         initialState={userState}
         indexStatus={indexStatus}
         relocationWarnings={relocationWarnings}
+        persistenceEnabled={indexStatus === 'completed'}
         onPersist={(state, generation) => window.xanadu.saveUserState({ handle: workspace.handle, generation, state })}
         onChooseAnother={() => {
           setWorkspace(null);
