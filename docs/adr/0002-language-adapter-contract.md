@@ -158,6 +158,8 @@ type ReferenceResolutionDto =
 
 ### 稳定 ID 与迁移
 
+MVP 0.1 实现使用完整词法容器路径（namespace/module/class/function/method/变量或属性函数容器）、signature hash 与 declaration fingerprint，不包含 absolute offset。索引在关系生成前强制 SymbolId 唯一；symbol/relation relocation journal 先于 cache 提交，matched 自动迁移，ambiguous/missing 证据进入用户可处理的 pending migration。
+
 `createStableSymbolId` 只保证在相同项目、相同声明身份和相同 adapter 规则内可重复。推荐输入：
 
 - project logical ID 与 language ID。

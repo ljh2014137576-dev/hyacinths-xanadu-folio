@@ -1,8 +1,8 @@
 # ADR-0004：MVP 0.1 实施偏差与后续迁移门
 
-- 状态：已接受（PR #16 最终修复）
+- 状态：接受候选（随 PR #16 合并生效）
 - 日期：2026-09-01
-- 细化/部分取代：ADR-0001 的 Forge Vite plugin 与 CodeMirror 6 首发实现；ADR-0003 的首个 CodeSurface 后端
+- 细化/部分取代：ADR-0001 的 Forge Vite plugin、立即启用 npm workspaces、CodeMirror 6 首发决定；ADR-0003 的首个 CodeSurface backend
 - 关联：[PR #16](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/pull/16)、[Issue #17](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/17)、[MVP 0.2](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/milestone/2)
 
 ## 背景

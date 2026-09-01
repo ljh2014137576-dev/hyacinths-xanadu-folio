@@ -9,7 +9,7 @@
 | `vite` / `@vitejs/plugin-react` | 8.2.2 / 6.1.1 | MIT | renderer 与 sandbox preload bundle | 多入口配置需要 smoke；preload 打成单文件 CJS，不放松 sandbox |
 | `@typescript/typescript6` | 6.0.2 package，Compiler `6.0.3` | Apache-2.0 | 官方 TypeScript 6 Compiler API/TypeChecker 与 `tsc6` | TypeScript 7.0 无编程 API；仅使用公开 API，adapter DTO 隔离未来迁移 |
 | `zod` | 4.5.4 | MIT | IPC 与持久化运行时校验 | schema 与领域品牌类型需同步；测试覆盖错误输入和 round-trip |
-| `minimatch` | 10.2.6 | BlueOak-1.0.0 | TypeScript config include/exclude 的成熟 glob 匹配；目录语义由受控枚举补全 | 只参与授权根内枚举；node_modules/vendor/build 不预枚举，模块解析仍按需 realpath 校验 |
+| `minimatch` | 10.2.6 | BlueOak-1.0.0 | TypeScript config 的有限 wildcard 匹配；关闭 brace/extglob/negation/comment/dot，并把 `[]` 按字面处理 | 只参与授权根内 include 枚举；no-tsconfig 检测不预枚举 node_modules/vendor/build，模块解析仍按需 realpath 校验 |
 | `eslint` / `typescript-eslint` | 10.9.1 / 8.69.0 | MIT | strict 静态检查 | 升级可能改变规则；关键版本固定，不用大面积 disable |
 | `vitest` / `@vitest/coverage-v8` | 4.1.11 | MIT | 单元与组件测试 | jsdom 不等于 Electron；另有真实 Electron E2E |
 | `@testing-library/*` / `jsdom` | 16.3.3、14.6.6、7.0.1 / 30.0.1 | MIT | 组件交互、键盘和可访问性测试 | DOM 几何不真实；桥梁使用纯几何测试和 Electron 截图补足 |

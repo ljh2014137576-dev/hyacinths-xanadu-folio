@@ -87,7 +87,9 @@ npm run start
 - utility process 独占本地文件读取与官方 `@typescript/typescript6` Compiler API/TypeChecker。
 - renderer 只消费结构化 DTO；不导入 Node、Electron 或 TypeScript Compiler API，也没有任意文件系统能力。
 - SourceAnchor 使用零基 UTF-16 半开区间。绝对路径只存在于受信任进程；UI、索引事实与日志使用项目相对路径。
+- SymbolId 使用 module/container/qualified name/signature/declaration fingerprint，不依赖 absolute offset；symbol/relation relocation 会保留可匹配的展开状态，ambiguous/missing 证据持久化后由用户确认、保留 stale 或移除。
 - 可重建 index cache 与 FlowPage/BusinessNode 用户资产分开保存；清缓存不会删除用户资产。
+- relocation journal 在新 cache 前提交，只有迁移后的用户状态保存成功才 ack，因此 cache/state 之间崩溃不会丢失候选证据。
 
 详细设计见 [架构文档](docs/architecture.md)、[需求映射](docs/requirements-mapping.md)和 [MVP 实施计划](docs/mvp-plan.md)。依赖用途、许可证和风险见 [依赖说明](docs/dependencies.md)。
 
