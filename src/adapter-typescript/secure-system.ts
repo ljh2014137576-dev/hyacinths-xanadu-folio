@@ -82,17 +82,17 @@ export class SecureTypeScriptSystem {
     this.violations.push({ code, entryName: basename(candidate) || 'workspace entry' });
   }
 
-  private allowedRoot(candidate: string): string | undefined {
+  private allowedRoot(candidate: string, reportViolation: boolean): string | undefined {
     const absolute = resolve(candidate);
     if (isContained(this.rootPath, absolute)) return this.rootPath;
     if (isContained(this.trustedLibRoot, absolute)) return this.trustedLibRoot;
-    this.record('WORKSPACE_PATH_ESCAPE', absolute);
+    if (reportViolation) this.record('WORKSPACE_PATH_ESCAPE', absolute);
     return undefined;
   }
 
-  private validate(candidate: string): string | undefined {
+  private validate(candidate: string, reportViolation = true): string | undefined {
     const absolute = resolve(candidate);
-    const allowedRoot = this.allowedRoot(absolute);
+    const allowedRoot = this.allowedRoot(absolute, reportViolation);
     if (allowedRoot === undefined) return undefined;
     const ancestor = nearestExistingAncestor(absolute);
     let realAncestor: string;
@@ -102,13 +102,13 @@ export class SecureTypeScriptSystem {
       return undefined;
     }
     if (!isContained(allowedRoot, realAncestor)) {
-      this.record('WORKSPACE_SYMLINK_ESCAPE', absolute);
+      if (reportViolation) this.record('WORKSPACE_SYMLINK_ESCAPE', absolute);
       return undefined;
     }
     if (existsSync(absolute)) {
       const realCandidate = realpathSync.native(absolute);
       if (!isContained(allowedRoot, realCandidate)) {
-        this.record('WORKSPACE_SYMLINK_ESCAPE', absolute);
+        if (reportViolation) this.record('WORKSPACE_SYMLINK_ESCAPE', absolute);
         return undefined;
       }
       return realCandidate;
@@ -137,7 +137,7 @@ export class SecureTypeScriptSystem {
   }
 
   readonly fileExists = (fileName: string): boolean => {
-    const candidate = this.validate(fileName);
+    const candidate = this.validate(fileName, false);
     return candidate !== undefined && existsSync(candidate) && statSync(candidate).isFile();
   };
 
@@ -148,18 +148,18 @@ export class SecureTypeScriptSystem {
   };
 
   readonly directoryExists = (directoryName: string): boolean => {
-    const candidate = this.validate(directoryName);
+    const candidate = this.validate(directoryName, false);
     return candidate !== undefined && existsSync(candidate) && statSync(candidate).isDirectory();
   };
 
-  readonly realpath = (path: string): string => this.validate(path) ?? resolve(path);
+  readonly realpath = (path: string): string => this.validate(path, false) ?? resolve(path);
 
   readonly getDirectories = (directoryName: string): readonly string[] => {
-    const directory = this.validate(directoryName);
+    const directory = this.validate(directoryName, false);
     if (directory === undefined || !existsSync(directory) || !statSync(directory).isDirectory()) return [];
     return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
       if (!entry.isDirectory() || entry.isSymbolicLink()) return [];
-      const candidate = this.validate(resolve(directory, entry.name));
+      const candidate = this.validate(resolve(directory, entry.name), false);
       return candidate === undefined ? [] : [candidate];
     });
   };
