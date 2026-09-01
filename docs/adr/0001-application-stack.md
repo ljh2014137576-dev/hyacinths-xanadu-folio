@@ -1,9 +1,11 @@
 # ADR-0001：桌面应用与前端技术栈
 
-- 状态：提议
+- 状态：已接受（分析 PR #15）
 - 日期：2026-09-01
 - 决策者：MVP 0.1 架构评审
 - 关联：[Issue #3](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/3)、[#5](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/5)、[#6](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/6)、[#7](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/7)、[#12](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/12)
+
+> 取代说明：Forge Vite plugin、立即启用 npm workspaces、CodeMirror 6 首发这三项具体决定由 [ADR-0004](0004-mvp-implementation-variances.md) 取代；Electron/React/TypeScript/Vite、安全进程边界和可替换 ports 继续有效。ADR-0004 随 PR #16 合并生效。
 
 ## 背景
 
@@ -167,10 +169,10 @@ SQLite 适合事务、增量关系查询、schema migration 和可重建缓存/�
 
 ## 验证门槛
 
-ADR 从“提议”转为“接受”前，首个实施 PR 至少证明：
+实施验证继续要求：
 
 - 三入口 build 可重复，renderer bundle 不含 Node/Compiler API。
 - sandbox + context isolation + 窄 IPC 通过安全 smoke。
 - TypeScript 6 compatibility API 能解析 MVP fixture 并产出精确 UTF-16 ranges。
-- CodeMirror 可暴露调用/定义 anchor，在 scroll/zoom/resize 后 SVG 几何正确。
+- 当前 CodeSurface port 可暴露调用/定义 anchor，并在 scroll/zoom/resize 后保持 SVG 几何正确；CodeMirror 迁移门见 ADR-0004。
 - SQLite candidate 能在 unpackaged 与 packaged utility process 中完成事务；否则启用 port 后的 JSON fallback 并记录后续决策。

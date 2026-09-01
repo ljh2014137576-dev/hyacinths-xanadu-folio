@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist-electron",
+    "rootDir": ".",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": true,
+    "isolatedModules": false,
+    "verbatimModuleSyntax": false,
+    "types": ["node", "electron"]
+  },
+  "include": [
+    "electron",
+    "src/ipc",
+    "src/model",
+    "src/adapter-api",
+    "src/adapter-typescript",
+    "src/index-core",
+    "src/storage"
+  ]
+}

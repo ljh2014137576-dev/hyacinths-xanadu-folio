@@ -1,8 +1,10 @@
 # ADR-0003：流程页与来源桥梁渲染模型
 
-- 状态：提议
+- 状态：已接受（分析 PR #15）
 - 日期：2026-09-01
 - 关联：[Issue #6](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/6)、[#7](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/7)、[#8](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/8)、[#9](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/9)、[#10](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/10)、[#11](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/11)、[#13](https://github.com/ljh2014137576-dev/xanadu-code-flow-browser/issues/13)
+
+> 取代说明：本 ADR 的首个 CodeSurface backend 由 [ADR-0004](0004-mvp-implementation-variances.md) 取代为只读 HTML port；四层模型、AnchorRegistry、SVG overlay、FlowPage 状态和迁移门继续有效。ADR-0004 随 PR #16 合并生效。
 
 ## 背景
 
@@ -53,7 +55,7 @@ FlowPage 持久化以下内容：
 
 ## 2. 源码表面
 
-MVP `CodeSurface` 使用 CodeMirror 6 只读实例。组件通过 adapter 暴露最小能力：
+MVP `CodeSurface` 当前使用 ADR-0004 的只读 HTML 实例；以下 port 合同保持不变，CodeMirror 是达到虚拟化迁移门后的候选后端：
 
 ```ts
 interface CodeSurface {
@@ -74,7 +76,7 @@ interface CodeSurface {
 - 只读 surface 关闭编辑、自动完成、格式化、写文件和语言服务网络能力。
 - 多表面实例必须显式 dispose；React unmount 不是唯一资源清理机制。
 
-CodeMirror 只渲染可见区域。`measureRange()` 返回 `not-mounted` 是正常状态，不是异常；桥梁层必须处理。
+任何未来虚拟化后端都可能返回 `not-mounted`；这是正常状态而非异常，桥梁层必须处理。当前 HTML 后端对已挂载 range 返回精确 DOM rect。
 
 ## 3. AnchorRegistry
 
