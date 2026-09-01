@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { indexTypeScriptProject } from '../../src/adapter-typescript/index.js';
 import { buildFlowPage } from '../../src/index-core/index.js';
-import { businessNodeId, flowPageId, type UserWorkspaceState } from '../../src/model/index.js';
+import { businessNodeId, type UserWorkspaceState } from '../../src/model/index.js';
 import { JsonStorage } from '../../src/storage/json-storage.js';
 
 const temporaryRoots: string[] = [];
