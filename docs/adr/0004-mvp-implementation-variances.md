@@ -45,7 +45,7 @@ MVP 0.1 的 TypeScript adapter 明确声明 `incrementalUpdate=false`。它执�
 
 ## Identity、资产与迁移 schema
 
-MVP 0.1 使用 identity recipe v2：SymbolFragment 携带词法容器、signature/declaration fingerprint；RelationBridge 携带完整调用表达式 fingerprint、lexical path 和 occurrence 证据。旧 recipe v1 只作为安全解码输入，迁移通过 relocation candidate/evidence 执行，不静默 reinterpret。
+MVP 0.1 使用 identity recipe v2：SymbolFragment 携带词法容器、`lexicalFingerprint`、`containerFingerprint` 与 signature/declaration fingerprint；Try/Catch 容器 fingerprint 由去 trivia 的 AST kind/token/value 结构递归生成。RelationBridge 携带完整调用表达式 fingerprint、lexical path 和 occurrence 证据。旧 recipe v1 只作为安全解码输入，迁移通过 relocation candidate/evidence 执行，不静默 reinterpret。
 
 UserWorkspaceState 的 `pendingMigrations` 只包含实际被 entry、placement、BusinessNode member、expanded/selected/via 引用的 unresolved IDs；`staleAssets` 保存用户选择保留的旧 ID、previous-index provenance、evidence 和 keptAt，并由 UI 渲染占位项。relocation journal 保存 source/target 映射，采用 generation/ack 协议，保证 cache、用户资产和崩溃恢复一致。
 
