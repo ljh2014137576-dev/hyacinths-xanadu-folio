@@ -45,4 +45,13 @@ describe('BusinessNode service', () => {
     const unreferenced: RelocationMatch = { status: 'missing', previousId: 'symbol:never-referenced', evidence: ['not in assets'] };
     expect(migrateUserAssets({ schemaVersion: 1, flowPages: [], businessNodes: [], recentFlowPageIds: [] }, [unreferenced]).state.pendingMigrations).toEqual([]);
   });
+
+  it('rejects orphan business-node pages and accepts persisted valid pairs', () => {
+    const now = '2026-09-01T00:00:00.000Z';
+    const node = createBusinessNode({ id: 'persisted', projectId: projectId('project:test'), name: 'Persisted', memberIds: [testSnapshot.fragments[0]!.id], availableFragmentIds: new Set(testSnapshot.fragments.map((fragment) => fragment.id)), now });
+    const page = buildBusinessNodeFlowPage(testSnapshot, node);
+    const valid: UserWorkspaceState = { schemaVersion: 1, flowPages: [page], businessNodes: [node], recentFlowPageIds: [page.id] };
+    expect(parseUserWorkspaceState(valid)).toEqual(valid);
+    expect(() => parseUserWorkspaceState({ ...valid, businessNodes: [] })).toThrow(/existing node/);
+  });
 });

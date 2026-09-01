@@ -403,6 +403,11 @@ export const userWorkspaceStateSchema = z.object({
     }
   }
   for (const page of state.flowPages) {
+    if (page.entry.kind === 'business-node' && !nodeIds.has(page.entry.id)) {
+      context.addIssue({ code: 'custom', path: ['flowPages', page.id, 'entry', 'id'], message: 'Business node flow page must reference an existing node' });
+    }
+  }
+  for (const page of state.flowPages) {
     const placementIds = new Set(page.placements.map((placement) => placement.id));
     for (const placement of page.placements) {
       if (placement.cycleTargetPlacementId !== undefined && !placementIds.has(placement.cycleTargetPlacementId)) context.addIssue({ code: 'custom', path: ['flowPages', page.id, 'placements'], message: 'Cycle target must reference a placement on the same page' });
